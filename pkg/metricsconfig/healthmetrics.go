@@ -14,7 +14,6 @@ import (
 	"github.com/cilium/tetragon/pkg/metrics/enforcermetrics"
 	"github.com/cilium/tetragon/pkg/metrics/errormetrics"
 	"github.com/cilium/tetragon/pkg/metrics/eventmetrics"
-	"github.com/cilium/tetragon/pkg/metrics/kprobemetrics"
 	"github.com/cilium/tetragon/pkg/metrics/opcodemetrics"
 	"github.com/cilium/tetragon/pkg/metrics/overhead"
 	"github.com/cilium/tetragon/pkg/metrics/policyfiltermetrics"
@@ -86,17 +85,13 @@ func registerHealthMetrics(group metrics.Group) {
 	exporter.RegisterMetrics(group)
 	// cgrup rate metrics
 	cgroupratemetrics.RegisterMetrics(group)
-	// kprobe metrics
-	kprobemetrics.RegisterMetrics(group)
-	group.ExtendInitForDocs(kprobemetrics.InitMetricsForDocs)
 	// policy metrics
 	group.MustRegister(policymetrics.NewPolicyCollector())
 	// gRPC metrics
 	group.MustRegister(grpcmetrics.NewServerMetrics())
-	// missed metris
-	group.MustRegister(kprobemetrics.NewBPFCollector())
 	// enforcer metrics
 	group.MustRegister(enforcermetrics.NewCollector())
 	// overhead metris
 	group.MustRegister(overhead.NewBPFCollector())
+
 }

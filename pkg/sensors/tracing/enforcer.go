@@ -21,10 +21,6 @@ import (
 	"github.com/cilium/tetragon/pkg/tracingpolicy"
 )
 
-const (
-	enforcerDataMapName = "enforcer_data"
-)
-
 type enforcerHandler struct {
 	syscallsSyms []string
 }

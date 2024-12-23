@@ -7,12 +7,10 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	"github.com/cilium/tetragon/pkg/reader/kernel"
-	"golang.org/x/sys/unix"
-
 	"github.com/cilium/tetragon/api/v1/tetragon"
 	"github.com/cilium/tetragon/pkg/api/tracingapi"
 	api "github.com/cilium/tetragon/pkg/api/tracingapi"
+	"github.com/cilium/tetragon/pkg/constants"
 	"github.com/cilium/tetragon/pkg/eventcache"
 	gt "github.com/cilium/tetragon/pkg/generictypes"
 	"github.com/cilium/tetragon/pkg/ksyms"
@@ -23,6 +21,7 @@ import (
 	"github.com/cilium/tetragon/pkg/procsyms"
 	"github.com/cilium/tetragon/pkg/reader/bpf"
 	"github.com/cilium/tetragon/pkg/reader/caps"
+	"github.com/cilium/tetragon/pkg/reader/kernel"
 	"github.com/cilium/tetragon/pkg/reader/network"
 	"github.com/cilium/tetragon/pkg/reader/notify"
 	"github.com/cilium/tetragon/pkg/reader/path"
@@ -428,9 +427,9 @@ func (msg *MsgGenericTracepointUnix) Retry(internal *process.ProcessInternal, ev
 
 func familyString(family uint16) string {
 	switch family {
-	case unix.AF_INET:
+	case constants.AF_INET:
 		return "AF_INET"
-	case unix.AF_INET6:
+	case constants.AF_INET6:
 		return "AF_INET6"
 	}
 	return ""
@@ -595,8 +594,8 @@ type MsgGenericKprobeUnix struct {
 	Args             []tracingapi.MsgGenericKprobeArg
 	PolicyName       string
 	Message          string
-	KernelStackTrace [unix.PERF_MAX_STACK_DEPTH]uint64
-	UserStackTrace   [unix.PERF_MAX_STACK_DEPTH]uint64
+	KernelStackTrace [constants.PERF_MAX_STACK_DEPTH]uint64
+	UserStackTrace   [constants.PERF_MAX_STACK_DEPTH]uint64
 	Tags             []string
 }
 
