@@ -5,6 +5,7 @@ package base
 
 import (
 	"log"
+	"runtime"
 	"sync"
 	"testing"
 
@@ -107,30 +108,39 @@ func GetTetragonConfMap() *program.Map {
 }
 
 func GetDefaultPrograms() []*program.Program {
-	progs := []*program.Program{
-		Exit,
-		Fork,
-		Execve,
-		ExecveBprmCommit,
+	var progs []*program.Program
+	if runtime.GOOS == "windows" {
+		progs = []*program.Program{}
+	} else {
+		progs = []*program.Program{
+			Exit,
+			Fork,
+			Execve,
+			ExecveBprmCommit,
+		}
 	}
 	return progs
 }
 
 func GetDefaultMaps() []*program.Map {
-	maps := []*program.Map{
-		ExecveMap,
-		ExecveJoinMap,
-		ExecveStats,
-		ExecveJoinMapStats,
-		ExecveTailCallsMap,
-		TCPMonMap,
-		TetragonConfMap,
-		StatsMap,
-		MatchBinariesSetMap,
-		ErrMetricsMap,
+	var maps []*program.Map
+	if runtime.GOOS == "windows" {
+		maps = []*program.Map{}
+	} else {
+		maps = []*program.Map{
+			ExecveMap,
+			ExecveJoinMap,
+			ExecveStats,
+			ExecveJoinMapStats,
+			ExecveTailCallsMap,
+			TCPMonMap,
+			TetragonConfMap,
+			StatsMap,
+			MatchBinariesSetMap,
+			ErrMetricsMap,
+		}
 	}
 	return maps
-
 }
 
 func initBaseSensor() *sensors.Sensor {

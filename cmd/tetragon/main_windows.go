@@ -42,7 +42,6 @@ import (
 	"github.com/cilium/tetragon/pkg/pidfile"
 	"github.com/cilium/tetragon/pkg/process"
 	"github.com/cilium/tetragon/pkg/ratelimit"
-	"github.com/cilium/tetragon/pkg/reader/namespace"
 	"github.com/cilium/tetragon/pkg/reader/proc"
 	"github.com/cilium/tetragon/pkg/rthooks"
 	"github.com/cilium/tetragon/pkg/sensors/base"
@@ -275,28 +274,6 @@ func tetragonExecuteCtx(ctx context.Context, cancel context.CancelFunc, ready fu
 		}
 		log.Info("Not unloading sensors on exit")
 	}
-
-	if viper.IsSet(option.KeyNetnsDir) {
-		defaults.NetnsDir = viper.GetString(option.KeyNetnsDir)
-	}
-
-	if err := checkStructAlignments(); err != nil {
-		return fmt.Errorf("struct alignment checks failed: %w", err)
-	}
-
-	// Initialize namespaces here. On errors fail, there is
-	// no point to continue if read/ptrace on /proc/1/ fails.
-	// Providing correct information can't be achieved anyway.
-	_, err = namespace.InitHostNamespace()
-	if err != nil {
-		log.WithField("procfs", option.Config.ProcFS).WithError(err).Fatalf("Failed to initialize host namespaces")
-	}
-
-	// Setup file system mounts
-	bpf.CheckOrMountFS("")
-	bpf.CheckOrMountDebugFS()
-	bpf.CheckOrMountCgroup2()
-	bpf.SetMapPrefix(option.Config.BpfDir)
 
 	// We try to detect previous instance, which might be there for legitimate reasons
 	// (--keep-sensors-on-exit) and rename to 'tetragon_old'.

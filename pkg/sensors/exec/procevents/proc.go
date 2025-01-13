@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/cilium/tetragon/pkg/api/processapi"
@@ -147,6 +148,9 @@ func procsFindDockerId(cgroups string) (string, int) {
 // returned.
 func procsDockerId(pid uint32) (string, error) {
 	pidstr := fmt.Sprint(pid)
+	if runtime.GOOS == "windows" {
+		return "", nil
+	}
 	cgroups, err := os.ReadFile(filepath.Join(option.Config.ProcFS, pidstr, "cgroup"))
 	if err != nil {
 		return "", err
