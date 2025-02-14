@@ -227,6 +227,7 @@ var (
 		"raw_tracepoint": program.LoadRawTracepointProgram,
 		"raw_tp":         program.LoadRawTracepointProgram,
 		"kprobe":         program.LoadKprobeProgram,
+		"windows":        program.LoadWindowsProgram,
 		"lsm":            program.LoadLSMProgram,
 	}
 )

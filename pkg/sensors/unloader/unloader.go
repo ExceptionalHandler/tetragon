@@ -4,7 +4,6 @@
 package unloader
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/cilium/ebpf"
@@ -68,25 +67,4 @@ func (lu LinkUnloader) Unload(unpin bool) error {
 		lu.Link.Unpin()
 	}
 	return lu.Link.Close()
-}
-
-// rawDetachUnloader can be used to unload cgroup and sockmap programs.
-type RawDetachUnloader struct {
-	TargetFD   int
-	Name       string
-	Prog       *ebpf.Program
-	AttachType ebpf.AttachType
-}
-
-func (rdu *RawDetachUnloader) Unload(_ bool) error {
-	defer rdu.Prog.Close()
-	err := link.RawDetachProgram(link.RawDetachProgramOptions{
-		Target:  rdu.TargetFD,
-		Program: rdu.Prog,
-		Attach:  rdu.AttachType,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to detach %s: %w", rdu.Name, err)
-	}
-	return nil
 }

@@ -1,3 +1,5 @@
+//go:build !windows
+
 package link
 
 import (
@@ -6,28 +8,8 @@ import (
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/asm"
 	"github.com/cilium/ebpf/internal"
+	"github.com/cilium/ebpf/internal/errno"
 	"github.com/cilium/ebpf/internal/sys"
-	"github.com/cilium/ebpf/internal/unix"
-)
-
-// Type is the kind of link.
-type Type = sys.LinkType
-
-// Valid link types.
-const (
-	UnspecifiedType   = sys.BPF_LINK_TYPE_UNSPEC
-	RawTracepointType = sys.BPF_LINK_TYPE_RAW_TRACEPOINT
-	TracingType       = sys.BPF_LINK_TYPE_TRACING
-	CgroupType        = sys.BPF_LINK_TYPE_CGROUP
-	IterType          = sys.BPF_LINK_TYPE_ITER
-	NetNsType         = sys.BPF_LINK_TYPE_NETNS
-	XDPType           = sys.BPF_LINK_TYPE_XDP
-	PerfEventType     = sys.BPF_LINK_TYPE_PERF_EVENT
-	KprobeMultiType   = sys.BPF_LINK_TYPE_KPROBE_MULTI
-	TCXType           = sys.BPF_LINK_TYPE_TCX
-	UprobeMultiType   = sys.BPF_LINK_TYPE_UPROBE_MULTI
-	NetfilterType     = sys.BPF_LINK_TYPE_NETFILTER
-	NetkitType        = sys.BPF_LINK_TYPE_NETKIT
 )
 
 var haveProgAttach = internal.NewFeatureTest("BPF_PROG_ATTACH", func() error {
@@ -83,10 +65,10 @@ var haveProgAttachReplace = internal.NewFeatureTest("BPF_PROG_ATTACH atomic repl
 	}
 
 	err = sys.ProgAttach(&attr)
-	if errors.Is(err, unix.EINVAL) {
+	if errors.Is(err, errno.EINVAL) {
 		return internal.ErrNotSupported
 	}
-	if errors.Is(err, unix.EBADF) {
+	if errors.Is(err, errno.EBADF) {
 		return nil
 	}
 	return err
@@ -100,10 +82,10 @@ var haveBPFLink = internal.NewFeatureTest("bpf_link", func() error {
 		AttachType: sys.AttachType(ebpf.AttachCGroupInetIngress),
 	}
 	_, err := sys.LinkCreate(&attr)
-	if errors.Is(err, unix.EINVAL) {
+	if errors.Is(err, errno.EINVAL) {
 		return internal.ErrNotSupported
 	}
-	if errors.Is(err, unix.EBADF) {
+	if errors.Is(err, errno.EBADF) {
 		return nil
 	}
 	return err
@@ -120,7 +102,7 @@ var haveProgQuery = internal.NewFeatureTest("BPF_PROG_QUERY", func() error {
 
 	err := sys.ProgQuery(&attr)
 
-	if errors.Is(err, unix.EBADF) {
+	if errors.Is(err, errno.EBADF) {
 		return nil
 	}
 	if err != nil {
@@ -155,7 +137,7 @@ var haveTCX = internal.NewFeatureTest("tcx", func() error {
 
 	_, err = sys.LinkCreateTcx(&attr)
 
-	if errors.Is(err, unix.ENODEV) {
+	if errors.Is(err, errno.ENODEV) {
 		return nil
 	}
 	if err != nil {
@@ -190,7 +172,7 @@ var haveNetkit = internal.NewFeatureTest("netkit", func() error {
 
 	_, err = sys.LinkCreateNetkit(&attr)
 
-	if errors.Is(err, unix.ENODEV) {
+	if errors.Is(err, errno.ENODEV) {
 		return nil
 	}
 	if err != nil {

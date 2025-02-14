@@ -145,13 +145,6 @@ func (s *Sensor) Load(bpfDir string) (err error) {
 		return fmt.Errorf("tetragon, aborting could not find BPF programs: %w", err)
 	}
 
-	for _, m := range s.Maps {
-		if err = s.loadMap(bpfDir, m); err != nil {
-			return fmt.Errorf("tetragon, aborting could not load sensor BPF maps: %w", err)
-		}
-		loadedMaps = append(loadedMaps, m)
-	}
-
 	for _, p := range s.Progs {
 		if p.LoadState.IsLoaded() {
 			l.WithField("prog", p.Name).Info("BPF prog is already loaded, incrementing reference count")
@@ -165,6 +158,7 @@ func (s *Sensor) Load(bpfDir string) (err error) {
 		p.LoadState.RefInc()
 		loadedProgs = append(loadedProgs, p)
 		l.WithField("prog", p.Name).WithField("label", p.Label).Debugf("BPF prog was loaded")
+
 	}
 
 	// Add the *loaded* programs and maps, so they can be unloaded later

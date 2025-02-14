@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/cilium/ebpf/btf"
 	"github.com/cilium/ebpf/internal"
+	"github.com/cilium/ebpf/internal/errno"
 	"github.com/cilium/ebpf/internal/sys"
 	"github.com/cilium/ebpf/internal/sysenc"
 	"github.com/cilium/ebpf/internal/unix"
@@ -118,13 +120,14 @@ func (ms *MapSpec) Copy() *MapSpec {
 
 // fixupMagicFields fills fields of MapSpec which are usually
 // left empty in ELF or which depend on runtime information.
+// It may also change Type on Windows.
 //
 // The method doesn't modify Spec, instead returning a copy.
 // The copy is only performed if fixups are necessary, so callers mustn't mutate
 // the returned spec.
 func (spec *MapSpec) fixupMagicFields() (*MapSpec, error) {
 	switch spec.Type {
-	case ArrayOfMaps, HashOfMaps:
+	case ArrayOfMaps, HashOfMaps, WindowsArrayOfMaps, WindowsHashOfMaps:
 		if spec.ValueSize != 0 && spec.ValueSize != 4 {
 			return nil, errors.New("ValueSize must be zero or four for map of map")
 		}
@@ -158,6 +161,11 @@ func (spec *MapSpec) fixupMagicFields() (*MapSpec, error) {
 			// behaviour in the past.
 			spec.MaxEntries = n
 		}
+	}
+
+	if p, _ := spec.Type.Decode(); runtime.GOOS == "windows" && p == Linux {
+		spec = spec.Copy()
+		spec.Type = fixupWindowsMapTypes(spec.Type)
 	}
 
 	return spec, nil
@@ -225,11 +233,13 @@ func (ms *MapSpec) Compatible(m *Map) error {
 		diffs = append(diffs, fmt.Sprintf("MaxEntries: %d changed to %d", m.maxEntries, ms.MaxEntries))
 	}
 
-	// BPF_F_RDONLY_PROG is set unconditionally for devmaps. Explicitly allow this
-	// mismatch.
-	if !((ms.Type == DevMap || ms.Type == DevMapHash) && m.flags^ms.Flags == sys.BPF_F_RDONLY_PROG) &&
-		m.flags != ms.Flags {
-		diffs = append(diffs, fmt.Sprintf("Flags: %d changed to %d", m.flags, ms.Flags))
+	if runtime.GOOS == "linux" {
+		// BPF_F_RDONLY_PROG is set unconditionally for devmaps. Explicitly allow this
+		// mismatch.
+		if !((ms.Type == DevMap || ms.Type == DevMapHash) && m.flags^ms.Flags == sys.BPF_F_RDONLY_PROG) &&
+			m.flags != ms.Flags {
+			diffs = append(diffs, fmt.Sprintf("Flags: %d changed to %d", m.flags, ms.Flags))
+		}
 	}
 
 	if len(diffs) == 0 {
@@ -259,14 +269,18 @@ type Map struct {
 	pinnedPath string
 	// Per CPU maps return values larger than the size in the spec
 	fullValueSize int
-
-	memory *Memory
 }
 
 // NewMapFromFD creates a map from a raw fd.
 //
 // You should not use fd after calling this function.
 func NewMapFromFD(fd int) (*Map, error) {
+	if runtime.GOOS == "windows" {
+		// Obtaining an fd that is compatible with this function requires calling
+		// into the efW runtime.
+		return nil, fmt.Errorf("new map from fd: %w", internal.ErrNotSupportedOnOS)
+	}
+
 	f, err := sys.NewFD(fd)
 	if err != nil {
 		return nil, err
@@ -335,7 +349,7 @@ func newMapWithOptions(spec *MapSpec, opts MapOptions) (_ *Map, err error) {
 
 		path := filepath.Join(opts.PinPath, spec.Name)
 		m, err := LoadPinnedMap(path, &opts.LoadPinOptions)
-		if errors.Is(err, unix.ENOENT) {
+		if errors.Is(err, errno.ENOENT) {
 			break
 		}
 		if err != nil {
@@ -357,7 +371,7 @@ func newMapWithOptions(spec *MapSpec, opts MapOptions) (_ *Map, err error) {
 	}
 
 	var innerFd *sys.FD
-	if spec.Type == ArrayOfMaps || spec.Type == HashOfMaps {
+	if spec.Type.canStoreMap() {
 		if spec.InnerMap == nil {
 			return nil, fmt.Errorf("%s requires InnerMap", spec.Type)
 		}
@@ -394,51 +408,6 @@ func newMapWithOptions(spec *MapSpec, opts MapOptions) (_ *Map, err error) {
 	return m, nil
 }
 
-// Memory returns a memory-mapped region for the Map. The Map must have been
-// created with the BPF_F_MMAPABLE flag. Repeated calls to Memory return the
-// same mapping. Callers are responsible for coordinating access to Memory.
-func (m *Map) Memory() (*Memory, error) {
-	if m.memory != nil {
-		return m.memory, nil
-	}
-
-	if m.flags&sys.BPF_F_MMAPABLE == 0 {
-		return nil, fmt.Errorf("Map was not created with the BPF_F_MMAPABLE flag: %w", ErrNotSupported)
-	}
-
-	size, err := m.memorySize()
-	if err != nil {
-		return nil, err
-	}
-
-	mm, err := newMemory(m.FD(), size)
-	if err != nil {
-		return nil, fmt.Errorf("creating new Memory: %w", err)
-	}
-
-	m.memory = mm
-
-	return mm, nil
-}
-
-func (m *Map) memorySize() (int, error) {
-	switch m.Type() {
-	case Array:
-		// In Arrays, values are always laid out on 8-byte boundaries regardless of
-		// architecture. Multiply by MaxEntries and align the result to the host's
-		// page size.
-		size := int(internal.Align(m.ValueSize(), 8) * m.MaxEntries())
-		size = internal.Align(size, os.Getpagesize())
-		return size, nil
-	case Arena:
-		// For Arenas, MaxEntries denotes the maximum number of pages available to
-		// the arena.
-		return int(m.MaxEntries()) * os.Getpagesize(), nil
-	}
-
-	return 0, fmt.Errorf("determine memory size of map type %s: %w", m.Type(), ErrNotSupported)
-}
-
 // createMap validates the spec's properties and creates the map in the kernel
 // using the given opts. It does not populate or freeze the map.
 func (spec *MapSpec) createMap(inner *sys.FD) (_ *Map, err error) {
@@ -463,8 +432,13 @@ func (spec *MapSpec) createMap(inner *sys.FD) (_ *Map, err error) {
 		return nil, err
 	}
 
+	p, sysMapType := spec.Type.Decode()
+	if p != internal.NativePlatform {
+		return nil, fmt.Errorf("map type %s: %w", spec.Type, internal.ErrNotSupportedOnOS)
+	}
+
 	attr := sys.MapCreateAttr{
-		MapType:    sys.MapType(spec.Type),
+		MapType:    sys.MapType(sysMapType),
 		KeySize:    spec.KeySize,
 		ValueSize:  spec.ValueSize,
 		MaxEntries: spec.MaxEntries,
@@ -500,7 +474,7 @@ func (spec *MapSpec) createMap(inner *sys.FD) (_ *Map, err error) {
 
 	// Some map types don't support BTF k/v in earlier kernel versions.
 	// Remove BTF metadata and retry map creation.
-	if (errors.Is(err, sys.ENOTSUPP) || errors.Is(err, unix.EINVAL)) && attr.BtfFd != 0 {
+	if (errors.Is(err, errno.ENOTSUPP) || errors.Is(err, errno.EINVAL)) && attr.BtfFd != 0 {
 		attr.BtfFd, attr.BtfKeyTypeId, attr.BtfValueTypeId = 0, 0, 0
 		fd, err = sys.MapCreate(&attr)
 	}
@@ -517,16 +491,16 @@ func (spec *MapSpec) createMap(inner *sys.FD) (_ *Map, err error) {
 }
 
 func handleMapCreateError(attr sys.MapCreateAttr, spec *MapSpec, err error) error {
-	if errors.Is(err, unix.EPERM) {
+	if errors.Is(err, errno.EPERM) {
 		return fmt.Errorf("map create: %w (MEMLOCK may be too low, consider rlimit.RemoveMemlock)", err)
 	}
-	if errors.Is(err, unix.EINVAL) && spec.MaxEntries == 0 {
+	if errors.Is(err, errno.EINVAL) && spec.MaxEntries == 0 {
 		return fmt.Errorf("map create: %w (MaxEntries may be incorrectly set to zero)", err)
 	}
-	if errors.Is(err, unix.EINVAL) && spec.Type == UnspecifiedMap {
+	if errors.Is(err, errno.EINVAL) && spec.Type == UnspecifiedMap {
 		return fmt.Errorf("map create: cannot use type %s", UnspecifiedMap)
 	}
-	if errors.Is(err, unix.EINVAL) && spec.Flags&sys.BPF_F_NO_PREALLOC > 0 {
+	if errors.Is(err, errno.EINVAL) && spec.Flags&sys.BPF_F_NO_PREALLOC > 0 {
 		return fmt.Errorf("map create: %w (noPrealloc flag may be incompatible with map type %s)", err, spec.Type)
 	}
 
@@ -557,7 +531,7 @@ func handleMapCreateError(attr sys.MapCreateAttr, spec *MapSpec, err error) erro
 		}
 	}
 	// BPF_MAP_TYPE_RINGBUF's max_entries must be a power-of-2 multiple of kernel's page size.
-	if errors.Is(err, unix.EINVAL) &&
+	if errors.Is(err, errno.EINVAL) &&
 		(attr.MapType == sys.BPF_MAP_TYPE_RINGBUF || attr.MapType == sys.BPF_MAP_TYPE_USER_RINGBUF) {
 		pageSize := uint32(os.Getpagesize())
 		maxEntries := attr.MaxEntries
@@ -582,7 +556,6 @@ func newMap(fd *sys.FD, name string, typ MapType, keySize, valueSize, maxEntries
 		flags,
 		"",
 		int(valueSize),
-		nil,
 	}
 
 	if !typ.hasPerCPUValue() {
@@ -645,6 +618,10 @@ func (m *Map) Info() (*MapInfo, error) {
 // Returns ErrNotSupported if the kernel has no BTF support, or if there is no
 // BTF associated with the Map.
 func (m *Map) Handle() (*btf.Handle, error) {
+	if runtime.GOOS == "windows" {
+		return nil, fmt.Errorf("map handle: %w", internal.ErrNotSupportedOnOS)
+	}
+
 	info, err := m.Info()
 	if err != nil {
 		return nil, err
@@ -764,7 +741,7 @@ func (m *Map) lookup(key interface{}, valueOut sys.Pointer, flags MapLookupFlags
 	}
 
 	if err = sys.MapLookupElem(&attr); err != nil {
-		if errors.Is(err, unix.ENOENT) {
+		if errors.Is(err, errno.ENOENT) {
 			return errMapLookupKeyNotExist
 		}
 		return fmt.Errorf("lookup: %w", wrapMapError(err))
@@ -987,7 +964,7 @@ func (m *Map) nextKey(key interface{}, nextKeyOut sys.Pointer) error {
 	if err = sys.MapGetNextKey(&attr); err != nil {
 		// Kernels 4.4.131 and earlier return EFAULT instead of a pointer to the
 		// first map element when a nil key pointer is specified.
-		if key == nil && errors.Is(err, unix.EFAULT) {
+		if runtime.GOOS == "linux" && key == nil && errors.Is(err, errno.EFAULT) {
 			var guessKey []byte
 			guessKey, err = m.guessNonExistentKey()
 			if err != nil {
@@ -1015,6 +992,10 @@ var mmapProtectedPage = sync.OnceValues(func() ([]byte, error) {
 // This is necessary on kernels before 4.4.132, since those don't support
 // iterating maps from the start by providing an invalid key pointer.
 func (m *Map) guessNonExistentKey() ([]byte, error) {
+	if runtime.GOOS == "windows" {
+		return nil, fmt.Errorf("guess non-existent key: %w", internal.ErrNotSupportedOnOS)
+	}
+
 	// Map a protected page and use that as the value pointer. This saves some
 	// work copying out the value, which we're not interested in.
 	page, err := mmapProtectedPage()
@@ -1125,7 +1106,7 @@ func (m *Map) batchLookup(cmd sys.Cmd, cursor *MapBatchCursor, keysOut, valuesOu
 	valueBuf := sysenc.SyscallOutput(valuesOut, count*int(m.fullValueSize))
 
 	n, err := m.batchLookupCmd(cmd, cursor, count, keysOut, valueBuf.Pointer(), opts)
-	if errors.Is(err, unix.ENOSPC) {
+	if errors.Is(err, errno.ENOSPC) {
 		// Hash tables return ENOSPC when the size of the batch is smaller than
 		// any bucket.
 		return n, fmt.Errorf("%w (batch size too small?)", err)
@@ -1151,7 +1132,7 @@ func (m *Map) batchLookupPerCPU(cmd sys.Cmd, cursor *MapBatchCursor, keysOut, va
 	valuePtr := sys.NewSlicePointer(valueBuf)
 
 	n, sysErr := m.batchLookupCmd(cmd, cursor, count, keysOut, valuePtr, opts)
-	if sysErr != nil && !errors.Is(sysErr, unix.ENOENT) {
+	if sysErr != nil && !errors.Is(sysErr, errno.ENOENT) {
 		return 0, err
 	}
 
@@ -1211,7 +1192,7 @@ func (m *Map) batchLookupCmd(cmd sys.Cmd, cursor *MapBatchCursor, count int, key
 
 	_, sysErr := sys.BPF(cmd, unsafe.Pointer(&attr), unsafe.Sizeof(attr))
 	sysErr = wrapMapError(sysErr)
-	if sysErr != nil && !errors.Is(sysErr, unix.ENOENT) {
+	if sysErr != nil && !errors.Is(sysErr, errno.ENOENT) {
 		return 0, sysErr
 	}
 
@@ -1394,7 +1375,6 @@ func (m *Map) Clone() (*Map, error) {
 		m.flags,
 		"",
 		m.fullValueSize,
-		nil,
 	}, nil
 }
 
@@ -1589,10 +1569,6 @@ func unmarshalMap(buf sysenc.Buffer) (*Map, error) {
 
 // marshalMap marshals the fd of a map into a buffer in host endianness.
 func marshalMap(m *Map, length int) ([]byte, error) {
-	if m == nil {
-		return nil, errors.New("can't marshal a nil Map")
-	}
-
 	if length != 4 {
 		return nil, fmt.Errorf("can't marshal map to %d bytes", length)
 	}
@@ -1729,4 +1705,38 @@ func sliceLen(slice any) (int, error) {
 		return 0, fmt.Errorf("%T is not a slice", slice)
 	}
 	return sliceValue.Len(), nil
+}
+
+// Map Linux-specific map types to their Windows equivalents.
+func fixupWindowsMapTypes(mt MapType) MapType {
+	switch mt {
+	case Array:
+		return WindowsArray
+	case Hash:
+		return WindowsHash
+	case ProgramArray:
+		return WindowsProgramArray
+	case PerCPUHash:
+		return WindowsPerCPUHash
+	case PerCPUArray:
+		return WindowsPerCPUArray
+	case LRUHash:
+		return WindowsLRUHash
+	case LRUCPUHash:
+		return WindowsLRUCPUHash
+	case ArrayOfMaps:
+		return WindowsArrayOfMaps
+	case HashOfMaps:
+		return WindowsHashOfMaps
+	case LPMTrie:
+		return WindowsLPMTrie
+	case Queue:
+		return WindowsQueue
+	case Stack:
+		return WindowsStack
+	case RingBuf:
+		return WindowsRingBuf
+	default:
+		return mt
+	}
 }

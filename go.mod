@@ -3,6 +3,8 @@ module github.com/cilium/tetragon
 // renovate: datasource=golang-version depName=go
 go 1.23.0
 
+
+
 toolchain go1.23.1
 
 require (
@@ -185,6 +187,7 @@ replace (
 	// Use local version of API
 	github.com/cilium/tetragon/api => ./api
 	github.com/cilium/tetragon/pkg/k8s => ./pkg/k8s
+	github.com/cilium/ebpf => ../ebpf
 )
 
 // This replace directive has to be in sync with with github.com/cilium/cilium

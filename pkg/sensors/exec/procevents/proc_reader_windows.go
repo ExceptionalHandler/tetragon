@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"unsafe"
 
@@ -21,113 +20,94 @@ import (
 	"github.com/cilium/tetragon/pkg/reader/proc"
 )
 
-// ToDo: Change these Structure's names to look less obvious
-type processBasicInformation32 struct {
-	Reserved1       uint32
-	PebBaseAddress  uint32
-	Reserved2       uint32
-	Reserved3       uint32
-	UniqueProcessId uint32
-	Reserved4       uint32
+type ProcessBasicInfo64 struct {
+	ExitStatus                   uint64
+	PebBaseAddress               uint64
+	AffinityMask                 uint64
+	BasePriority                 uint64
+	UniqueProcessId              uint64
+	InheritedFromUniqueProcessId uint64
 }
 
-type processBasicInformation64 struct {
-	Reserved1       uint64
-	PebBaseAddress  uint64
-	Reserved2       uint64
-	Reserved3       uint64
-	UniqueProcessId uint64
-	Reserved4       uint64
-}
-
-type processEnvironmentBlock32 struct {
+type PEB32 struct {
 	Reserved1         [2]uint8
 	BeingDebugged     uint8
 	Reserved2         uint8
 	Reserved3         [2]uint32
 	Ldr               uint32
 	ProcessParameters uint32
-	// More fields which we don't use so far
+	Reserved4         [3]uint32
+	AltThunkListPtr   uint32
+	Reserved5         [4]uint32
+	//--unused--
+}
+
+type PEB64 struct {
+	Reserved1         [2]uint8
+	BeingDebugged     uint8
+	Reserved2         [5]uint8
+	Reserved3         [2]uint64
+	Ldr               uint64
+	ProcessParameters uint64
+	Reserved4         [3]uint64
+	AltThunkListPtr   uint64
+	Reserved5         [4]uint64
+	//--unused--
 }
 
 const (
-	ProcessBasicInformation = 0
-	ProcessWow64Information = 26
-	ProcessQueryInformation = windows.PROCESS_DUP_HANDLE | windows.PROCESS_QUERY_INFORMATION
-
-	SystemExtendedHandleInformationClass = 64
+	PROCESSOR_ARCHITECTURE_AMD64   = 9      //x64 (AMD or Intel)
+	PROCESSOR_ARCHITECTURE_ARM     = 5      //ARM
+	PROCESSOR_ARCHITECTURE_ARM64   = 12     // ARM64
+	PROCESSOR_ARCHITECTURE_IA64    = 6      //Intel Itanium-based
+	PROCESSOR_ARCHITECTURE_INTEL   = 0      //x86
+	PROCESSOR_ARCHITECTURE_UNKNOWN = 0xffff //Unknown arc
 )
 
 var (
-	ModuleNt                             = windows.NewLazySystemDLL("ntdll.dll")
-	Modkernel32                          = windows.NewLazySystemDLL("kernel32.dll")
-	ProcNtQuerySystemInformation         = ModuleNt.NewProc("NtQuerySystemInformation")
-	ProcRtlGetNativeSystemInformation    = ModuleNt.NewProc("RtlGetNativeSystemInformation")
-	ProcRtlNtStatusToDosError            = ModuleNt.NewProc("RtlNtStatusToDosError")
-	ProcNtQueryInformationProcess        = ModuleNt.NewProc("NtQueryInformationProcess")
-	ProcNtReadVirtualMemory              = ModuleNt.NewProc("NtReadVirtualMemory")
-	ProcNtWow64QueryInformationProcess64 = ModuleNt.NewProc("NtWow64QueryInformationProcess64")
-	ProcNtWow64ReadVirtualMemory64       = ModuleNt.NewProc("NtWow64ReadVirtualMemory64")
-	procGetNativeSystemInfo              = Modkernel32.NewProc("GetNativeSystemInfo")
-	procQueryFullProcessImageNameW       = Modkernel32.NewProc("QueryFullProcessImageNameW")
-	procQueryDosDeviceW                  = Modkernel32.NewProc("QueryDosDeviceW")
+	ModuleNt                         = windows.NewLazySystemDLL("ntdll.dll")
+	ModuleKernel32                   = windows.NewLazySystemDLL("kernel32.dll")
+	NtQuerySystemInformation         = ModuleNt.NewProc("NtQuerySystemInformation")
+	RtlGetNativeSystemInformation    = ModuleNt.NewProc("RtlGetNativeSystemInformation")
+	RtlNtStatusToDosError            = ModuleNt.NewProc("RtlNtStatusToDosError")
+	NtQueryInformationProcess        = ModuleNt.NewProc("NtQueryInformationProcess")
+	NtReadVirtualMemory              = ModuleNt.NewProc("NtReadVirtualMemory")
+	NtWow64QueryInformationProcess64 = ModuleNt.NewProc("NtWow64QueryInformationProcess64")
+	NtWow64ReadVirtualMemory64       = ModuleNt.NewProc("NtWow64ReadVirtualMemory64")
+	QueryFullProcessImageNameW       = ModuleKernel32.NewProc("QueryFullProcessImageNameW")
+	QueryDosDeviceW                  = ModuleKernel32.NewProc("QueryDosDeviceW")
+	GetSystemInfo                    = ModuleKernel32.NewProc("GetSystemInfo")
 
-	processorArchitecture uint
+	processorArch uint
 )
 
-type rtlUserProcessParameters32 struct {
-	Reserved1                      [16]uint8
-	ConsoleHandle                  uint32
-	ConsoleFlags                   uint32
-	StdInputHandle                 uint32
-	StdOutputHandle                uint32
-	StdErrorHandle                 uint32
-	CurrentDirectoryPathNameLength uint16
-	_                              uint16 // Max Length
-	CurrentDirectoryPathAddress    uint32
-	CurrentDirectoryHandle         uint32
-	DllPathNameLength              uint16
-	_                              uint16 // Max Length
-	DllPathAddress                 uint32
-	ImagePathNameLength            uint16
-	_                              uint16 // Max Length
-	ImagePathAddress               uint32
-	CommandLineLength              uint16
-	_                              uint16 // Max Length
-	CommandLineAddress             uint32
-	EnvironmentAddress             uint32
-	// More fields which we don't use so far
+type UnicodeString32 struct {
+	Length        uint16
+	MaximumLength uint16
+	Buf           uint32
 }
 
-type rtlUserProcessParameters64 struct {
-	Reserved1                      [16]uint8
-	ConsoleHandle                  uint64
-	ConsoleFlags                   uint64
-	StdInputHandle                 uint64
-	StdOutputHandle                uint64
-	StdErrorHandle                 uint64
-	CurrentDirectoryPathNameLength uint16
-	_                              uint16 // Max Length
-	_                              uint32 // Padding
-	CurrentDirectoryPathAddress    uint64
-	CurrentDirectoryHandle         uint64
-	DllPathNameLength              uint16
-	_                              uint16 // Max Length
-	_                              uint32 // Padding
-	DllPathAddress                 uint64
-	ImagePathNameLength            uint16
-	_                              uint16 // Max Length
-	_                              uint32 // Padding
-	ImagePathAddress               uint64
-	CommandLineLength              uint16
-	_                              uint16 // Max Length
-	_                              uint32 // Padding
-	CommandLineAddress             uint64
-	EnvironmentAddress             uint64
-	// More fields which we don't use so far
+type UnicodeString64 struct {
+	Length        uint16
+	MaximumLength uint16
+	Buf           uint64
 }
 
-type systemInfo struct {
+type RtlUserProcessParams32 struct {
+	Reserved1     [16]uint8
+	Reserved2     [10]uint32
+	ImagePathName UnicodeString32
+	CommandLine   UnicodeString32
+}
+
+type RtlUserProcessParams64 struct {
+	Reserved1     [16]uint8
+	Reserved2     [10]uint64
+	ImagePathName UnicodeString64
+	CommandLine   UnicodeString64
+}
+
+type SYSTEM_INFO struct {
 	wProcessorArchitecture      uint16
 	wReserved                   uint16
 	dwPageSize                  uint32
@@ -139,17 +119,6 @@ type systemInfo struct {
 	dwAllocationGranularity     uint32
 	wProcessorLevel             uint16
 	wProcessorRevision          uint16
-}
-
-type processEnvironmentBlock64 struct {
-	Reserved1         [2]uint8
-	BeingDebugged     uint8
-	Reserved2         uint8
-	_                 [4]uint8 // padding, since we are 64 bit, the next pointer is 64 bit aligned (when compiling for 32 bit, this is not the case without manual padding)
-	Reserved3         [2]uint64
-	Ldr               uint64
-	ProcessParameters uint64
-	// More fields which we don't use so far
 }
 
 func convertUTF16ToString(src []byte) string {
@@ -219,23 +188,40 @@ func writeExecveMap(procs []procs) {
 
 }
 
-func getUserProcessParams64(handle windows.Handle) (rtlUserProcessParameters64, error) {
+func getProcessParamsFromHandle64(handle windows.Handle) (RtlUserProcessParams64, error) {
 	pebAddress, err := queryPebAddress(syscall.Handle(handle), false)
 	if err != nil {
-		return rtlUserProcessParameters64{}, fmt.Errorf("cannot locate process PEB: %w", err)
+		return RtlUserProcessParams64{}, fmt.Errorf("cannot locate process PEB: %w", err)
 	}
 
-	buf := readProcessMemory(syscall.Handle(handle), false, pebAddress, uint(unsafe.Sizeof(processEnvironmentBlock64{})))
-	if len(buf) != int(unsafe.Sizeof(processEnvironmentBlock64{})) {
-		return rtlUserProcessParameters64{}, fmt.Errorf("cannot read process PEB")
+	buf := readProcessMemory(syscall.Handle(handle), false, pebAddress, uint(unsafe.Sizeof(PEB64{})))
+	if len(buf) != int(unsafe.Sizeof(PEB64{})) {
+		return RtlUserProcessParams64{}, fmt.Errorf("cannot read process PEB")
 	}
-	peb := (*processEnvironmentBlock64)(unsafe.Pointer(&buf[0]))
-	userProcessAddress := peb.ProcessParameters
-	buf = readProcessMemory(syscall.Handle(handle), false, userProcessAddress, uint(unsafe.Sizeof(rtlUserProcessParameters64{})))
-	if len(buf) != int(unsafe.Sizeof(rtlUserProcessParameters64{})) {
-		return rtlUserProcessParameters64{}, fmt.Errorf("cannot read user process parameters")
+	peb := (*PEB64)(unsafe.Pointer(&buf[0]))
+	buf = readProcessMemory(syscall.Handle(handle), false, peb.ProcessParameters, uint(unsafe.Sizeof(RtlUserProcessParams64{})))
+	if len(buf) != int(unsafe.Sizeof(RtlUserProcessParams64{})) {
+		return RtlUserProcessParams64{}, fmt.Errorf("cannot read user process parameters")
 	}
-	return *(*rtlUserProcessParameters64)(unsafe.Pointer(&buf[0])), nil
+	return *(*RtlUserProcessParams64)(unsafe.Pointer(&buf[0])), nil
+}
+
+func getProcessParamsFromHandle32(handle windows.Handle) (RtlUserProcessParams32, error) {
+	pebAddress, err := queryPebAddress(syscall.Handle(handle), true)
+	if err != nil {
+		return RtlUserProcessParams32{}, fmt.Errorf("cannot locate process PEB: %w", err)
+	}
+
+	buf := readProcessMemory(syscall.Handle(handle), true, pebAddress, uint(unsafe.Sizeof(PEB32{})))
+	if len(buf) != int(unsafe.Sizeof(PEB32{})) {
+		return RtlUserProcessParams32{}, fmt.Errorf("cannot read process PEB")
+	}
+	peb := (*PEB32)(unsafe.Pointer(&buf[0]))
+	buf = readProcessMemory(syscall.Handle(handle), true, uint64(peb.ProcessParameters), uint(unsafe.Sizeof(RtlUserProcessParams32{})))
+	if len(buf) != int(unsafe.Sizeof(RtlUserProcessParams32{})) {
+		return RtlUserProcessParams32{}, fmt.Errorf("cannot read user process parameters")
+	}
+	return *(*RtlUserProcessParams32)(unsafe.Pointer(&buf[0])), nil
 }
 
 func getProcessTimesFromHandle(hProc windows.Handle) (windows.Rusage, error) {
@@ -248,14 +234,15 @@ func getProcessTimesFromHandle(hProc windows.Handle) (windows.Rusage, error) {
 	return times, nil
 }
 
+// ToDo: Test the 32 bit piece for wow64 processes
 func queryPebAddress(procHandle syscall.Handle, is32BitProcess bool) (uint64, error) {
 	if is32BitProcess {
 		//we are on a 64-bit process reading an external 32-bit process
 		var wow64 uint
 
-		ret, _, _ := ProcNtQueryInformationProcess.Call(
+		ret, _, _ := NtQueryInformationProcess.Call(
 			uintptr(procHandle),
-			uintptr(ProcessWow64Information),
+			uintptr(windows.ProcessWow64Information),
 			uintptr(unsafe.Pointer(&wow64)),
 			uintptr(unsafe.Sizeof(wow64)),
 			uintptr(0),
@@ -267,11 +254,11 @@ func queryPebAddress(procHandle syscall.Handle, is32BitProcess bool) (uint64, er
 		}
 	} else {
 		//we are on a 64-bit process reading an external 64-bit process
-		var info processBasicInformation64
+		var info ProcessBasicInfo64
 
-		ret, _, _ := ProcNtQueryInformationProcess.Call(
+		ret, _, _ := NtQueryInformationProcess.Call(
 			uintptr(procHandle),
-			uintptr(ProcessBasicInformation),
+			uintptr(windows.ProcessBasicInformation),
 			uintptr(unsafe.Pointer(&info)),
 			uintptr(unsafe.Sizeof(info)),
 			uintptr(0),
@@ -285,107 +272,59 @@ func queryPebAddress(procHandle syscall.Handle, is32BitProcess bool) (uint64, er
 }
 
 func readProcessMemory(procHandle syscall.Handle, _ bool, address uint64, size uint) []byte {
-	var read uint
+	var bytesRead uint
 
-	buffer := make([]byte, size)
+	buf := make([]byte, size)
 
-	ret, _, _ := ProcNtReadVirtualMemory.Call(
+	ret, _, _ := NtReadVirtualMemory.Call(
 		uintptr(procHandle),
 		uintptr(address),
-		uintptr(unsafe.Pointer(&buffer[0])),
+		uintptr(unsafe.Pointer(&buf[0])),
 		uintptr(size),
-		uintptr(unsafe.Pointer(&read)),
+		uintptr(unsafe.Pointer(&bytesRead)),
 	)
-	if int(ret) >= 0 && read > 0 {
-		return buffer[:read]
+	if int(ret) >= 0 && bytesRead > 0 {
+		return buf[:bytesRead]
 	}
 	return nil
 }
 
-var isInit bool = false
-
-func init_once() {
-	if isInit {
-		return
-	}
-	var systemInfo systemInfo
-	procGetNativeSystemInfo.Call(uintptr(unsafe.Pointer(&systemInfo)))
-	processorArchitecture = uint(systemInfo.wProcessorArchitecture)
-
+func init() {
+	var systemInfo SYSTEM_INFO
+	GetSystemInfo.Call(uintptr(unsafe.Pointer(&systemInfo)))
+	processorArch = uint(systemInfo.wProcessorArchitecture)
 }
 
-func is32BitProcess(h windows.Handle) bool {
-	const (
-		PROCESSOR_ARCHITECTURE_INTEL = 0
-		PROCESSOR_ARCHITECTURE_ARM   = 5
-		PROCESSOR_ARCHITECTURE_ARM64 = 12
-		PROCESSOR_ARCHITECTURE_IA64  = 6
-		PROCESSOR_ARCHITECTURE_AMD64 = 9
-	)
-	init_once()
-	var procIs32Bits bool
-	switch processorArchitecture {
-	case PROCESSOR_ARCHITECTURE_INTEL:
-		fallthrough
-	case PROCESSOR_ARCHITECTURE_ARM:
-		procIs32Bits = true
+func isProcess32Bit(h windows.Handle) bool {
+
+	var wow64Process uint
+	is2Bit := (unsafe.Sizeof(wow64Process) == 4)
+	switch processorArch {
+	// We ned to check only for 32 bit processes running on x64 machines
 	case PROCESSOR_ARCHITECTURE_ARM64:
 		fallthrough
 	case PROCESSOR_ARCHITECTURE_IA64:
 		fallthrough
 	case PROCESSOR_ARCHITECTURE_AMD64:
-		var wow64 uint
-
-		ret, _, _ := ProcNtQueryInformationProcess.Call(
+		ret, _, _ := NtQueryInformationProcess.Call(
 			uintptr(h),
-			uintptr(ProcessWow64Information),
-			uintptr(unsafe.Pointer(&wow64)),
-			uintptr(unsafe.Sizeof(wow64)),
+			uintptr(windows.ProcessWow64Information),
+			uintptr(unsafe.Pointer(&wow64Process)),
+			uintptr(unsafe.Sizeof(wow64Process)),
 			uintptr(0),
 		)
-		if int(ret) >= 0 {
-			if wow64 != 0 {
-				procIs32Bits = true
-			}
-		} else {
-			//if the OS does not support the call, we fallback into the bitness of the app
-			if unsafe.Sizeof(wow64) == 4 {
-				procIs32Bits = true
-			}
-		}
-
-	default:
-		//for other unknown platforms, we rely on process platform
-		if unsafe.Sizeof(processorArchitecture) == 8 {
-			procIs32Bits = false
-		} else {
-			procIs32Bits = true
+		if (ret > 0) && (wow64Process != 0) {
+			is2Bit = true
 		}
 	}
-	return procIs32Bits
-}
-
-func convertToDrivePath(p string) string {
-	rawDrive := strings.Join(strings.Split(p, `\`)[:3], `\`)
-
-	for d := 'A'; d <= 'Z'; d++ {
-		szDeviceName := string(d) + ":"
-		szTarget := make([]uint16, 512)
-		ret, _, _ := procQueryDosDeviceW.Call(uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(szDeviceName))),
-			uintptr(unsafe.Pointer(&szTarget[0])),
-			uintptr(len(szTarget)))
-		if ret != 0 && windows.UTF16ToString(szTarget[:]) == rawDrive {
-			return filepath.Join(szDeviceName, p[len(rawDrive):])
-		}
-	}
-	return p
+	return is2Bit
 }
 
 func getProcessImagePathFromHandle(hProc windows.Handle) (string, error) {
 	buf := make([]uint16, syscall.MAX_LONG_PATH)
 	size := uint32(syscall.MAX_LONG_PATH)
-	if err := procQueryFullProcessImageNameW.Find(); err == nil { // Vista+
-		ret, _, err := procQueryFullProcessImageNameW.Call(
+	if err := QueryFullProcessImageNameW.Find(); err == nil {
+		ret, _, err := QueryFullProcessImageNameW.Call(
 			uintptr(hProc),
 			uintptr(0),
 			uintptr(unsafe.Pointer(&buf[0])),
@@ -395,61 +334,40 @@ func getProcessImagePathFromHandle(hProc windows.Handle) (string, error) {
 		}
 		return windows.UTF16ToString(buf[:]), nil
 	}
-	return "", fmt.Errorf("Could not find Utilit Method to get image path")
-}
-
-func getProcessParams(handle windows.Handle) (rtlUserProcessParameters32, error) {
-	pebAddress, err := queryPebAddress(syscall.Handle(handle), true)
-	if err != nil {
-		return rtlUserProcessParameters32{}, fmt.Errorf("cannot locate process PEB: %w", err)
-	}
-
-	buf := readProcessMemory(syscall.Handle(handle), true, pebAddress, uint(unsafe.Sizeof(processEnvironmentBlock32{})))
-	if len(buf) != int(unsafe.Sizeof(processEnvironmentBlock32{})) {
-		return rtlUserProcessParameters32{}, fmt.Errorf("cannot read process PEB")
-	}
-	peb := (*processEnvironmentBlock32)(unsafe.Pointer(&buf[0]))
-	userProcessAddress := uint64(peb.ProcessParameters)
-	buf = readProcessMemory(syscall.Handle(handle), true, userProcessAddress, uint(unsafe.Sizeof(rtlUserProcessParameters32{})))
-	if len(buf) != int(unsafe.Sizeof(rtlUserProcessParameters32{})) {
-		return rtlUserProcessParameters32{}, fmt.Errorf("cannot read user process parameters")
-	}
-	return *(*rtlUserProcessParameters32)(unsafe.Pointer(&buf[0])), nil
+	return "", fmt.Errorf("Could not find function QueryFullProcessImageNameW")
 }
 
 func fetchProcessCmdLineFromHandle(hProc windows.Handle) (string, error) {
 
-	is32Bit := is32BitProcess(hProc)
+	is32Bit := isProcess32Bit(hProc)
 
 	if is32Bit {
-		procParams32, paramsErr := getProcessParams(hProc)
+		procParams32, paramsErr := getProcessParamsFromHandle32(hProc)
 		if paramsErr != nil {
 			return "", paramsErr
 		}
-		if procParams32.CommandLineLength > 0 {
-			commandLine := readProcessMemory(syscall.Handle(hProc), is32Bit, uint64(procParams32.CommandLineAddress), uint(procParams32.CommandLineLength))
-			if len(commandLine) != int(procParams32.CommandLineLength) {
+		if procParams32.CommandLine.Length > 0 {
+			commandLine := readProcessMemory(syscall.Handle(hProc), is32Bit, uint64(procParams32.CommandLine.Buf), uint(procParams32.CommandLine.Length))
+			if len(commandLine) != int(procParams32.CommandLine.Length) {
 				return "", errors.New("cannot read command line")
 			}
 
 			return convertUTF16ToString(commandLine), nil
 		}
 	} else {
-		procParams64, paramsErr := getUserProcessParams64(hProc)
+		procParams64, paramsErr := getProcessParamsFromHandle64(hProc)
 		if paramsErr != nil {
 			return "", paramsErr
 		}
-		if procParams64.CommandLineLength > 0 {
-			commandLine := readProcessMemory(syscall.Handle(hProc), is32Bit, procParams64.CommandLineAddress, uint(procParams64.CommandLineLength))
-			if len(commandLine) != int(procParams64.CommandLineLength) {
+		if procParams64.CommandLine.Length > 0 {
+			commandLine := readProcessMemory(syscall.Handle(hProc), is32Bit, procParams64.CommandLine.Buf, uint(procParams64.CommandLine.Length))
+			if len(commandLine) != int(procParams64.CommandLine.Length) {
 				return "", errors.New("cannot read command line")
 			}
 
 			return convertUTF16ToString(commandLine), nil
 		}
 	}
-
-	// If we reach here, we have no command line
 	return "", nil
 }
 
@@ -469,6 +387,11 @@ func NewProcess(procEntry windows.ProcessEntry32) (procs, error) {
 		return empty, err
 	}
 	defer windows.CloseHandle(hProc)
+	execPath, err = getProcessImagePathFromHandle(hProc)
+	if err != nil {
+		logger.GetLogger().WithError(err).Warnf("Reading process path error")
+		return empty, err
+	}
 	cmdline, err = fetchProcessCmdLineFromHandle(hProc)
 	if err != nil {
 		logger.GetLogger().WithError(err).Warnf("Reading process cmdline error")

@@ -21,6 +21,14 @@ import (
 var (
 	basePolicy = "__base__"
 
+	CreateProcess = program.Builder(
+		"process_monitor.sys",
+		"process",
+		"ProcessMonitor",
+		"process::program",
+		"windows",
+	).SetPolicy(basePolicy)
+
 	Execve = program.Builder(
 		config.ExecObj(),
 		"sched/sched_process_exec",
@@ -72,6 +80,10 @@ var (
 	MatchBinariesSetMap = program.MapBuilder(mbset.MapName, Execve)
 
 	ErrMetricsMap = program.MapBuilder(errmetrics.MapName, Execve)
+
+	ProcessRingBufMap = program.MapBuilder("process_ringbuf", CreateProcess)
+	ProcessPidMap     = program.MapBuilder("process_map", CreateProcess)
+	ProcessCmdMap     = program.MapBuilder("command_map", CreateProcess)
 )
 
 func setupPrograms() {
@@ -110,7 +122,9 @@ func GetTetragonConfMap() *program.Map {
 func GetDefaultPrograms() []*program.Program {
 	var progs []*program.Program
 	if runtime.GOOS == "windows" {
-		progs = []*program.Program{}
+		progs = []*program.Program{
+			CreateProcess,
+		}
 	} else {
 		progs = []*program.Program{
 			Exit,
@@ -125,7 +139,11 @@ func GetDefaultPrograms() []*program.Program {
 func GetDefaultMaps() []*program.Map {
 	var maps []*program.Map
 	if runtime.GOOS == "windows" {
-		maps = []*program.Map{}
+		maps = []*program.Map{
+			ProcessRingBufMap,
+			ProcessCmdMap,
+			ProcessPidMap,
+		}
 	} else {
 		maps = []*program.Map{
 			ExecveMap,

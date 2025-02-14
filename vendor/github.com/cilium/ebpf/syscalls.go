@@ -10,19 +10,19 @@ import (
 
 	"github.com/cilium/ebpf/asm"
 	"github.com/cilium/ebpf/internal"
+	"github.com/cilium/ebpf/internal/errno"
 	"github.com/cilium/ebpf/internal/linux"
 	"github.com/cilium/ebpf/internal/sys"
 	"github.com/cilium/ebpf/internal/tracefs"
-	"github.com/cilium/ebpf/internal/unix"
 )
 
 var (
 	// pre-allocating these here since they may
 	// get called in hot code paths and cause
 	// unnecessary memory allocations
-	sysErrKeyNotExist  = sys.Error(ErrKeyNotExist, unix.ENOENT)
-	sysErrKeyExist     = sys.Error(ErrKeyExist, unix.EEXIST)
-	sysErrNotSupported = sys.Error(ErrNotSupported, sys.ENOTSUPP)
+	sysErrKeyNotExist  = sys.Error(ErrKeyNotExist, errno.ENOENT)
+	sysErrKeyExist     = sys.Error(ErrKeyExist, errno.EEXIST)
+	sysErrNotSupported = sys.Error(ErrNotSupported, errno.ENOTSUPP)
 )
 
 // invalidBPFObjNameChar returns true if char may not appear in
@@ -62,6 +62,10 @@ func progLoad(insns asm.Instructions, typ ProgramType, license string) (*sys.FD,
 }
 
 var haveNestedMaps = internal.NewFeatureTest("nested maps", func() error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+
 	_, err := sys.MapCreate(&sys.MapCreateAttr{
 		MapType:    sys.MapType(ArrayOfMaps),
 		KeySize:    4,
@@ -70,14 +74,14 @@ var haveNestedMaps = internal.NewFeatureTest("nested maps", func() error {
 		// Invalid file descriptor.
 		InnerMapFd: ^uint32(0),
 	})
-	if errors.Is(err, unix.EINVAL) {
+	if errors.Is(err, errno.EINVAL) {
 		return internal.ErrNotSupported
 	}
-	if errors.Is(err, unix.EBADF) {
+	if errors.Is(err, errno.EBADF) {
 		return nil
 	}
 	return err
-}, "4.12")
+}, "4.12", "windows:0.20.0")
 
 var haveMapMutabilityModifiers = internal.NewFeatureTest("read- and write-only maps", func() error {
 	// This checks BPF_F_RDONLY_PROG and BPF_F_WRONLY_PROG. Since
@@ -151,19 +155,19 @@ func wrapMapError(err error) error {
 		return nil
 	}
 
-	if errors.Is(err, unix.ENOENT) {
+	if errors.Is(err, errno.ENOENT) {
 		return sysErrKeyNotExist
 	}
 
-	if errors.Is(err, unix.EEXIST) {
+	if errors.Is(err, errno.EEXIST) {
 		return sysErrKeyExist
 	}
 
-	if errors.Is(err, sys.ENOTSUPP) {
+	if errors.Is(err, errno.ENOTSUPP) {
 		return sysErrNotSupported
 	}
 
-	if errors.Is(err, unix.E2BIG) {
+	if errors.Is(err, errno.E2BIG) {
 		return fmt.Errorf("key too big for map: %w", err)
 	}
 
@@ -171,6 +175,10 @@ func wrapMapError(err error) error {
 }
 
 var haveObjName = internal.NewFeatureTest("object names", func() error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+
 	attr := sys.MapCreateAttr{
 		MapType:    sys.MapType(Array),
 		KeySize:    4,
@@ -179,24 +187,20 @@ var haveObjName = internal.NewFeatureTest("object names", func() error {
 		MapName:    sys.NewObjName("feature_test"),
 	}
 
-	// Tolerate EPERM as this runs during ELF loading which is potentially
-	// unprivileged. Only EINVAL is conclusive, thrown from CHECK_ATTR.
 	fd, err := sys.MapCreate(&attr)
-	if errors.Is(err, unix.EPERM) {
-		return nil
-	}
-	if errors.Is(err, unix.EINVAL) {
-		return internal.ErrNotSupported
-	}
 	if err != nil {
-		return err
+		return internal.ErrNotSupported
 	}
 
 	_ = fd.Close()
 	return nil
-}, "4.15")
+}, "4.15", "windows:0.20.0")
 
 var objNameAllowsDot = internal.NewFeatureTest("dot in object names", func() error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+
 	if err := haveObjName(); err != nil {
 		return err
 	}
@@ -209,23 +213,14 @@ var objNameAllowsDot = internal.NewFeatureTest("dot in object names", func() err
 		MapName:    sys.NewObjName(".test"),
 	}
 
-	// Tolerate EPERM, otherwise MapSpec.Name has its dots removed when run by
-	// unprivileged tools. (bpf2go, other code gen). Only EINVAL is conclusive,
-	// thrown from bpf_obj_name_cpy().
 	fd, err := sys.MapCreate(&attr)
-	if errors.Is(err, unix.EPERM) {
-		return nil
-	}
-	if errors.Is(err, unix.EINVAL) {
-		return internal.ErrNotSupported
-	}
 	if err != nil {
-		return err
+		return internal.ErrNotSupported
 	}
 
 	_ = fd.Close()
 	return nil
-}, "5.2")
+}, "5.2", "windows:0.20.0")
 
 var haveBatchAPI = internal.NewFeatureTest("map batch api", func() error {
 	var maxEntries uint32 = 2
@@ -343,11 +338,11 @@ var haveProgramExtInfos = internal.NewFeatureTest("program ext_infos", func() er
 		ProgBtfFd:   math.MaxUint32,
 	})
 
-	if errors.Is(err, unix.EBADF) {
+	if errors.Is(err, errno.EBADF) {
 		return nil
 	}
 
-	if errors.Is(err, unix.E2BIG) {
+	if errors.Is(err, errno.E2BIG) {
 		return ErrNotSupported
 	}
 

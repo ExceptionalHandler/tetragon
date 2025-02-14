@@ -15,11 +15,11 @@ import (
 	"github.com/cilium/ebpf/asm"
 	"github.com/cilium/ebpf/btf"
 	"github.com/cilium/ebpf/internal"
+	"github.com/cilium/ebpf/internal/errno"
 	"github.com/cilium/ebpf/internal/kallsyms"
 	"github.com/cilium/ebpf/internal/linux"
 	"github.com/cilium/ebpf/internal/sys"
 	"github.com/cilium/ebpf/internal/sysenc"
-	"github.com/cilium/ebpf/internal/unix"
 )
 
 // ErrNotSupported is returned whenever the kernel doesn't support a feature.
@@ -262,7 +262,7 @@ func newProgramWithOptions(spec *ProgramSpec, opts ProgramOptions) (*Program, er
 	// macro for kprobe-type programs.
 	// Overwrite Kprobe program version if set to zero or the magic version constant.
 	kv := spec.KernelVersion
-	if spec.Type == Kprobe && (kv == 0 || kv == internal.MagicKernelVersion) {
+	if runtime.GOOS == "linux" && spec.Type == Kprobe && (kv == 0 || kv == internal.MagicKernelVersion) {
 		v, err := linux.KernelVersion()
 		if err != nil {
 			return nil, fmt.Errorf("detecting kernel version: %w", err)
@@ -270,8 +270,13 @@ func newProgramWithOptions(spec *ProgramSpec, opts ProgramOptions) (*Program, er
 		kv = v.Kernel()
 	}
 
+	p, progType := spec.Type.Decode()
+	if p != internal.NativePlatform {
+		return nil, fmt.Errorf("program type %s: %w", spec.Type, internal.ErrNotSupportedOnOS)
+	}
+
 	attr := &sys.ProgLoadAttr{
-		ProgType:           sys.ProgType(spec.Type),
+		ProgType:           sys.ProgType(progType),
 		ProgFlags:          spec.Flags,
 		ExpectedAttachType: sys.AttachType(spec.AttachType),
 		License:            sys.NewStringPointer(spec.License),
@@ -413,7 +418,7 @@ func newProgramWithOptions(spec *ProgramSpec, opts ProgramOptions) (*Program, er
 		var fd *sys.FD
 		fd, err = sys.ProgLoad(attr)
 		if err == nil {
-			return &Program{unix.ByteSliceToString(logBuf), fd, spec.Name, "", spec.Type}, nil
+			return &Program{sys.ByteSliceToString(logBuf), fd, spec.Name, "", spec.Type}, nil
 		}
 
 		if opts.LogDisabled {
@@ -425,7 +430,7 @@ func newProgramWithOptions(spec *ProgramSpec, opts ProgramOptions) (*Program, er
 			break
 		}
 
-		if attr.LogSize != 0 && !errors.Is(err, unix.ENOSPC) {
+		if attr.LogSize != 0 && !errors.Is(err, errno.ENOSPC) {
 			// Logging is enabled and the error is not ENOSPC, so we can infer
 			// that the log buffer is large enough.
 			break
@@ -461,14 +466,14 @@ func newProgramWithOptions(spec *ProgramSpec, opts ProgramOptions) (*Program, er
 
 	tail := logBuf[max(end-256, 0):end]
 	switch {
-	case errors.Is(err, unix.EPERM):
+	case errors.Is(err, errno.EPERM):
 		if len(logBuf) > 0 && logBuf[0] == 0 {
 			// EPERM due to RLIMIT_MEMLOCK happens before the verifier, so we can
 			// check that the log is empty to reduce false positives.
 			return nil, fmt.Errorf("load program: %w (MEMLOCK may be too low, consider rlimit.RemoveMemlock)", err)
 		}
 
-	case errors.Is(err, unix.EINVAL):
+	case errors.Is(err, errno.EINVAL):
 		if bytes.Contains(tail, coreBadCall) {
 			err = errBadRelocation
 			break
@@ -477,7 +482,7 @@ func newProgramWithOptions(spec *ProgramSpec, opts ProgramOptions) (*Program, er
 			break
 		}
 
-	case errors.Is(err, unix.EACCES):
+	case errors.Is(err, errno.EACCES):
 		if bytes.Contains(tail, coreBadLoad) {
 			err = errBadRelocation
 			break
@@ -485,7 +490,7 @@ func newProgramWithOptions(spec *ProgramSpec, opts ProgramOptions) (*Program, er
 	}
 
 	// hasFunctionReferences may be expensive, so check it last.
-	if (errors.Is(err, unix.EINVAL) || errors.Is(err, unix.EPERM)) &&
+	if (errors.Is(err, errno.EINVAL) || errors.Is(err, errno.EPERM)) &&
 		hasFunctionReferences(spec.Instructions) {
 		if err := haveBPFToBPFCalls(); err != nil {
 			return nil, fmt.Errorf("load program: %w", err)
@@ -499,8 +504,14 @@ func newProgramWithOptions(spec *ProgramSpec, opts ProgramOptions) (*Program, er
 //
 // You should not use fd after calling this function.
 //
-// Requires at least Linux 4.10.
+// Requires at least Linux 4.10. Returns an error on Windows.
 func NewProgramFromFD(fd int) (*Program, error) {
+	if runtime.GOOS == "windows" {
+		// Obtaining an fd that is compatible with this function requires calling
+		// into the efW runtime.
+		return nil, fmt.Errorf("new program from fd: %w", internal.ErrNotSupportedOnOS)
+	}
+
 	f, err := sys.NewFD(fd)
 	if err != nil {
 		return nil, err
@@ -557,6 +568,10 @@ func (p *Program) Info() (*ProgramInfo, error) {
 // Returns ErrNotSupported if the kernel has no BTF support, or if there is no
 // BTF associated with the program.
 func (p *Program) Handle() (*btf.Handle, error) {
+	if runtime.GOOS == "windows" {
+		return nil, fmt.Errorf("map handle: %w", internal.ErrNotSupportedOnOS)
+	}
+
 	info, err := p.Info()
 	if err != nil {
 		return nil, err
@@ -743,6 +758,10 @@ func (p *Program) Benchmark(in []byte, repeat int, reset func()) (uint32, time.D
 }
 
 var haveProgRun = internal.NewFeatureTest("BPF_PROG_RUN", func() error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+
 	prog, err := NewProgram(&ProgramSpec{
 		// SocketFilter does not require privileges on newer kernels.
 		Type: SocketFilter,
@@ -767,16 +786,16 @@ var haveProgRun = internal.NewFeatureTest("BPF_PROG_RUN", func() error {
 
 	err = sys.ProgRun(&attr)
 	switch {
-	case errors.Is(err, unix.EINVAL):
+	case errors.Is(err, errno.EINVAL):
 		// Check for EINVAL specifically, rather than err != nil since we
 		// otherwise misdetect due to insufficient permissions.
 		return internal.ErrNotSupported
 
-	case errors.Is(err, unix.EINTR):
+	case errors.Is(err, errno.EINTR):
 		// We know that PROG_TEST_RUN is supported if we get EINTR.
 		return nil
 
-	case errors.Is(err, sys.ENOTSUPP):
+	case errors.Is(err, errno.ENOTSUPP):
 		// The first PROG_TEST_RUN patches shipped in 4.12 didn't include
 		// a test runner for SocketFilter. ENOTSUPP means PROG_TEST_RUN is
 		// supported, but not for the program type used in the probe.
@@ -784,7 +803,7 @@ var haveProgRun = internal.NewFeatureTest("BPF_PROG_RUN", func() error {
 	}
 
 	return err
-}, "4.12")
+}, "4.12", "windows:0.20")
 
 func (p *Program) run(opts *RunOptions) (uint32, time.Duration, error) {
 	if uint(len(opts.Data)) > math.MaxUint32 {
@@ -831,7 +850,7 @@ retry:
 			break retry
 		}
 
-		if errors.Is(err, unix.EINTR) {
+		if errors.Is(err, errno.EINTR) {
 			if attr.Repeat <= 1 {
 				// Older kernels check whether enough repetitions have been
 				// executed only after checking for pending signals.
@@ -854,7 +873,7 @@ retry:
 			continue retry
 		}
 
-		if errors.Is(err, sys.ENOTSUPP) {
+		if errors.Is(err, errno.ENOTSUPP) {
 			return 0, 0, fmt.Errorf("kernel doesn't support running %s: %w", p.Type(), ErrNotSupported)
 		}
 
@@ -893,10 +912,6 @@ func unmarshalProgram(buf sysenc.Buffer) (*Program, error) {
 }
 
 func marshalProgram(p *Program, length int) ([]byte, error) {
-	if p == nil {
-		return nil, errors.New("can't marshal a nil Program")
-	}
-
 	if length != 4 {
 		return nil, fmt.Errorf("can't marshal program to %d bytes", length)
 	}

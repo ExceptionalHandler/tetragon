@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"reflect"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -16,8 +17,8 @@ import (
 	"github.com/cilium/ebpf/asm"
 	"github.com/cilium/ebpf/btf"
 	"github.com/cilium/ebpf/internal"
+	"github.com/cilium/ebpf/internal/errno"
 	"github.com/cilium/ebpf/internal/sys"
-	"github.com/cilium/ebpf/internal/unix"
 )
 
 // The *Info structs expose metadata about a program or map. Most
@@ -70,17 +71,22 @@ func newMapInfoFromFd(fd *sys.FD) (*MapInfo, error) {
 	err1 := sys.ObjInfo(fd, &info)
 	// EINVAL means the kernel doesn't support BPF_OBJ_GET_INFO_BY_FD. Continue
 	// with fdinfo if that's the case.
-	if err1 != nil && !errors.Is(err1, unix.EINVAL) {
+	if err1 != nil && !errors.Is(err1, errno.EINVAL) {
 		return nil, fmt.Errorf("getting object info: %w", err1)
 	}
 
+	typ, err := MapTypeForPlatform(internal.NativePlatform, info.Type)
+	if err != nil {
+		return nil, fmt.Errorf("map type: %w", err)
+	}
+
 	mi := &MapInfo{
-		MapType(info.Type),
+		typ,
 		info.KeySize,
 		info.ValueSize,
 		info.MaxEntries,
 		uint32(info.MapFlags),
-		unix.ByteSliceToString(info.Name[:]),
+		sys.ByteSliceToString(info.Name[:]),
 		MapID(info.Id),
 		btf.ID(info.BtfId),
 		info.MapExtra,
@@ -105,8 +111,9 @@ func newMapInfoFromFd(fd *sys.FD) (*MapInfo, error) {
 // readMapInfoFromProc queries map information about the given fd from
 // /proc/self/fdinfo. It only writes data into fields that have a zero value.
 func readMapInfoFromProc(fd *sys.FD, mi *MapInfo) error {
-	return scanFdInfo(fd, map[string]interface{}{
-		"map_type":    &mi.Type,
+	var mapType uint32
+	err := scanFdInfo(fd, map[string]interface{}{
+		"map_type":    &mapType,
 		"map_id":      &mi.id,
 		"key_size":    &mi.KeySize,
 		"value_size":  &mi.ValueSize,
@@ -116,6 +123,18 @@ func readMapInfoFromProc(fd *sys.FD, mi *MapInfo) error {
 		"memlock":     &mi.memlock,
 		"frozen":      &mi.frozen,
 	})
+	if err != nil {
+		return err
+	}
+
+	if mi.Type == 0 {
+		mi.Type, err = MapTypeForPlatform(Linux, mapType)
+		if err != nil {
+			return fmt.Errorf("map type: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // ID returns the map ID.
@@ -179,40 +198,6 @@ type programStats struct {
 	recursionMisses uint64
 }
 
-// programJitedInfo holds information about JITed info of a program.
-type programJitedInfo struct {
-	// ksyms holds the ksym addresses of the BPF program, including those of its
-	// subprograms.
-	//
-	// Available from 4.18.
-	ksyms    []uintptr
-	numKsyms uint32
-
-	// insns holds the JITed machine native instructions of the program,
-	// including those of its subprograms.
-	//
-	// Available from 4.13.
-	insns    []byte
-	numInsns uint32
-
-	// lineInfos holds the JITed line infos, which are kernel addresses.
-	//
-	// Available from 5.0.
-	lineInfos    []uint64
-	numLineInfos uint32
-
-	// lineInfoRecSize is the size of a single line info record.
-	//
-	// Available from 5.0.
-	lineInfoRecSize uint32
-
-	// funcLens holds the insns length of each function.
-	//
-	// Available from 4.18.
-	funcLens    []uint32
-	numFuncLens uint32
-}
-
 // ProgramInfo describes a program.
 type ProgramInfo struct {
 	Type ProgramType
@@ -233,12 +218,12 @@ type ProgramInfo struct {
 	jitedSize            uint32
 	verifiedInstructions uint32
 
-	jitedInfo programJitedInfo
-
 	lineInfos    []byte
 	numLineInfos uint32
 	funcInfos    []byte
 	numFuncInfos uint32
+	ksymInfos    []uint64
+	numKsymInfos uint32
 }
 
 func newProgramInfoFromFd(fd *sys.FD) (*ProgramInfo, error) {
@@ -251,11 +236,16 @@ func newProgramInfoFromFd(fd *sys.FD) (*ProgramInfo, error) {
 		return nil, err
 	}
 
+	typ, err := ProgramTypeForPlatform(internal.NativePlatform, info.Type)
+	if err != nil {
+		return nil, fmt.Errorf("program type: %w", err)
+	}
+
 	pi := ProgramInfo{
-		Type: ProgramType(info.Type),
+		Type: typ,
 		id:   ProgramID(info.Id),
 		Tag:  hex.EncodeToString(info.Tag[:]),
-		Name: unix.ByteSliceToString(info.Name[:]),
+		Name: sys.ByteSliceToString(info.Name[:]),
 		btf:  btf.ID(info.BtfId),
 		stats: &programStats{
 			runtime:         time.Duration(info.RunTimeNs),
@@ -285,8 +275,13 @@ func newProgramInfoFromFd(fd *sys.FD) (*ProgramInfo, error) {
 		pi.maps = nil
 	}
 
+	if runtime.GOOS == "windows" {
+		if info.Tag == [8]uint8{} {
+			pi.Tag = ""
+		}
+	}
 	// createdByUID and NrMapIds were introduced in the same kernel version.
-	if pi.maps != nil {
+	if pi.maps != nil && runtime.GOOS == "linux" {
 		pi.createdByUID = info.CreatedByUid
 		pi.haveCreatedByUID = true
 	}
@@ -316,37 +311,11 @@ func newProgramInfoFromFd(fd *sys.FD) (*ProgramInfo, error) {
 		makeSecondCall = true
 	}
 
-	pi.jitedInfo.lineInfoRecSize = info.JitedLineInfoRecSize
-	if info.JitedProgLen > 0 {
-		pi.jitedInfo.numInsns = info.JitedProgLen
-		pi.jitedInfo.insns = make([]byte, info.JitedProgLen)
-		info2.JitedProgLen = info.JitedProgLen
-		info2.JitedProgInsns = sys.NewSlicePointer(pi.jitedInfo.insns)
-		makeSecondCall = true
-	}
-
-	if info.NrJitedFuncLens > 0 {
-		pi.jitedInfo.numFuncLens = info.NrJitedFuncLens
-		pi.jitedInfo.funcLens = make([]uint32, info.NrJitedFuncLens)
-		info2.NrJitedFuncLens = info.NrJitedFuncLens
-		info2.JitedFuncLens = sys.NewSlicePointer(pi.jitedInfo.funcLens)
-		makeSecondCall = true
-	}
-
-	if info.NrJitedLineInfo > 0 {
-		pi.jitedInfo.numLineInfos = info.NrJitedLineInfo
-		pi.jitedInfo.lineInfos = make([]uint64, info.NrJitedLineInfo)
-		info2.NrJitedLineInfo = info.NrJitedLineInfo
-		info2.JitedLineInfo = sys.NewSlicePointer(pi.jitedInfo.lineInfos)
-		info2.JitedLineInfoRecSize = info.JitedLineInfoRecSize
-		makeSecondCall = true
-	}
-
 	if info.NrJitedKsyms > 0 {
-		pi.jitedInfo.numKsyms = info.NrJitedKsyms
-		pi.jitedInfo.ksyms = make([]uintptr, info.NrJitedKsyms)
-		info2.JitedKsyms = sys.NewSlicePointer(pi.jitedInfo.ksyms)
+		pi.ksymInfos = make([]uint64, info.NrJitedKsyms)
+		info2.JitedKsyms = sys.NewSlicePointer(pi.ksymInfos)
 		info2.NrJitedKsyms = info.NrJitedKsyms
+		pi.numKsymInfos = info.NrJitedKsyms
 		makeSecondCall = true
 	}
 
@@ -361,11 +330,12 @@ func newProgramInfoFromFd(fd *sys.FD) (*ProgramInfo, error) {
 
 func newProgramInfoFromProc(fd *sys.FD) (*ProgramInfo, error) {
 	var info ProgramInfo
+	var progType uint32
 	err := scanFdInfo(fd, map[string]interface{}{
-		"prog_type": &info.Type,
+		"prog_type": &progType,
 		"prog_tag":  &info.Tag,
 	})
-	if errors.Is(err, ErrNotSupported) {
+	if errors.Is(err, ErrNotSupported) && !errors.Is(err, internal.ErrNotSupportedOnOS) {
 		return nil, &internal.UnsupportedFeatureError{
 			Name:           "reading program info from /proc/self/fdinfo",
 			MinimumVersion: internal.Version{4, 10, 0},
@@ -373,6 +343,11 @@ func newProgramInfoFromProc(fd *sys.FD) (*ProgramInfo, error) {
 	}
 	if err != nil {
 		return nil, err
+	}
+
+	info.Type, err = ProgramTypeForPlatform(Linux, progType)
+	if err != nil {
+		return nil, fmt.Errorf("program type: %w", err)
 	}
 
 	return &info, nil
@@ -440,52 +415,6 @@ func (pi *ProgramInfo) RecursionMisses() (uint64, bool) {
 	return 0, false
 }
 
-// btfSpec returns the BTF spec associated with the program.
-func (pi *ProgramInfo) btfSpec() (*btf.Spec, error) {
-	id, ok := pi.BTFID()
-	if !ok {
-		return nil, fmt.Errorf("program created without BTF or unsupported kernel: %w", ErrNotSupported)
-	}
-
-	h, err := btf.NewHandleFromID(id)
-	if err != nil {
-		return nil, fmt.Errorf("get BTF handle: %w", err)
-	}
-	defer h.Close()
-
-	spec, err := h.Spec(nil)
-	if err != nil {
-		return nil, fmt.Errorf("get BTF spec: %w", err)
-	}
-
-	return spec, nil
-}
-
-// LineInfos returns the BTF line information of the program.
-//
-// Available from 5.0.
-//
-// Requires CAP_SYS_ADMIN or equivalent for reading BTF information. Returns
-// ErrNotSupported if the program was created without BTF or if the kernel
-// doesn't support the field.
-func (pi *ProgramInfo) LineInfos() (btf.LineOffsets, error) {
-	if len(pi.lineInfos) == 0 {
-		return nil, fmt.Errorf("insufficient permissions or unsupported kernel: %w", ErrNotSupported)
-	}
-
-	spec, err := pi.btfSpec()
-	if err != nil {
-		return nil, err
-	}
-
-	return btf.LoadLineInfos(
-		bytes.NewReader(pi.lineInfos),
-		internal.NativeEndian,
-		pi.numLineInfos,
-		spec,
-	)
-}
-
 // Instructions returns the 'xlated' instruction stream of the program
 // after it has been verified and rewritten by the kernel. These instructions
 // cannot be loaded back into the kernel as-is, this is mainly used for
@@ -514,8 +443,8 @@ func (pi *ProgramInfo) Instructions() (asm.Instructions, error) {
 	}
 
 	r := bytes.NewReader(pi.insns)
-	var insns asm.Instructions
-	if err := insns.Unmarshal(r, internal.NativeEndian); err != nil {
+	insns, err := asm.AppendInstructions(nil, r, internal.NativeEndian, internal.NativePlatform)
+	if err != nil {
 		return nil, fmt.Errorf("unmarshaling instructions: %w", err)
 	}
 
@@ -524,7 +453,7 @@ func (pi *ProgramInfo) Instructions() (asm.Instructions, error) {
 		if err != nil {
 			// Getting a BTF handle requires CAP_SYS_ADMIN, if not available we get an -EPERM.
 			// Ignore it and fall back to instructions without metadata.
-			if !errors.Is(err, unix.EPERM) {
+			if !errors.Is(err, errno.EPERM) {
 				return nil, fmt.Errorf("unable to get BTF handle: %w", err)
 			}
 		}
@@ -623,42 +552,18 @@ func (pi *ProgramInfo) VerifiedInstructions() (uint32, bool) {
 	return pi.verifiedInstructions, pi.verifiedInstructions > 0
 }
 
-// JitedKsymAddrs returns the ksym addresses of the BPF program, including its
+// KsymAddrs returns the ksym addresses of the BPF program, including its
 // subprograms. The addresses correspond to their symbols in /proc/kallsyms.
-//
-// Available from 4.18. Note that before 5.x, this field can be empty for
-// programs without subprograms (bpf2bpf calls).
-//
-// The bool return value indicates whether this optional field is available.
-func (pi *ProgramInfo) JitedKsymAddrs() ([]uintptr, bool) {
-	return pi.jitedInfo.ksyms, len(pi.jitedInfo.ksyms) > 0
-}
-
-// JitedInsns returns the JITed machine native instructions of the program.
-//
-// Available from 4.13.
-//
-// The bool return value indicates whether this optional field is available.
-func (pi *ProgramInfo) JitedInsns() ([]byte, bool) {
-	return pi.jitedInfo.insns, len(pi.jitedInfo.insns) > 0
-}
-
-// JitedLineInfos returns the JITed line infos of the program.
-//
-// Available from 5.0.
-//
-// The bool return value indicates whether this optional field is available.
-func (pi *ProgramInfo) JitedLineInfos() ([]uint64, bool) {
-	return pi.jitedInfo.lineInfos, len(pi.jitedInfo.lineInfos) > 0
-}
-
-// JitedFuncLens returns the insns length of each function in the JITed program.
 //
 // Available from 4.18.
 //
 // The bool return value indicates whether this optional field is available.
-func (pi *ProgramInfo) JitedFuncLens() ([]uint32, bool) {
-	return pi.jitedInfo.funcLens, len(pi.jitedInfo.funcLens) > 0
+func (pi *ProgramInfo) KsymAddrs() ([]uintptr, bool) {
+	addrs := make([]uintptr, 0, len(pi.ksymInfos))
+	for _, addr := range pi.ksymInfos {
+		addrs = append(addrs, uintptr(addr))
+	}
+	return addrs, pi.numKsymInfos > 0
 }
 
 // FuncInfos returns the offset and function information of all (sub)programs in
@@ -670,13 +575,20 @@ func (pi *ProgramInfo) JitedFuncLens() ([]uint32, bool) {
 // ErrNotSupported if the program was created without BTF or if the kernel
 // doesn't support the field.
 func (pi *ProgramInfo) FuncInfos() (btf.FuncOffsets, error) {
-	if len(pi.funcInfos) == 0 {
-		return nil, fmt.Errorf("insufficient permissions or unsupported kernel: %w", ErrNotSupported)
+	id, ok := pi.BTFID()
+	if pi.numFuncInfos == 0 || !ok {
+		return nil, fmt.Errorf("program created without BTF or unsupported kernel: %w", ErrNotSupported)
 	}
 
-	spec, err := pi.btfSpec()
+	h, err := btf.NewHandleFromID(id)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get BTF handle: %w", err)
+	}
+	defer h.Close()
+
+	spec, err := h.Spec(nil)
+	if err != nil {
+		return nil, fmt.Errorf("get BTF spec: %w", err)
 	}
 
 	return btf.LoadFuncInfos(
@@ -688,6 +600,10 @@ func (pi *ProgramInfo) FuncInfos() (btf.FuncOffsets, error) {
 }
 
 func scanFdInfo(fd *sys.FD, fields map[string]interface{}) error {
+	if runtime.GOOS == "windows" {
+		return fmt.Errorf("read fdinfo: %w", internal.ErrNotSupportedOnOS)
+	}
+
 	fh, err := os.Open(fmt.Sprintf("/proc/self/fdinfo/%d", fd.Int()))
 	if err != nil {
 		return err
@@ -768,6 +684,10 @@ func EnableStats(which uint32) (io.Closer, error) {
 }
 
 var haveProgramInfoMapIDs = internal.NewFeatureTest("map IDs in program info", func() error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+
 	prog, err := progLoad(asm.Instructions{
 		asm.LoadImm(asm.R0, 0, asm.DWord),
 		asm.Return(),
@@ -782,14 +702,14 @@ var haveProgramInfoMapIDs = internal.NewFeatureTest("map IDs in program info", f
 		// any maps.
 		NrMapIds: 1,
 	})
-	if errors.Is(err, unix.EINVAL) {
+	if errors.Is(err, errno.EINVAL) {
 		// Most likely the syscall doesn't exist.
 		return internal.ErrNotSupported
 	}
-	if errors.Is(err, unix.E2BIG) {
+	if errors.Is(err, errno.E2BIG) {
 		// We've hit check_uarg_tail_zero on older kernels.
 		return internal.ErrNotSupported
 	}
 
 	return err
-}, "4.15")
+}, "4.15", "windows:0.20.0")

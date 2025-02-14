@@ -7,24 +7,33 @@ import (
 	"context"
 	"runtime"
 	"sync"
-	"syscall"
 	"time"
-	"unsafe"
 
-	"github.com/cilium/ebpf/perf"
 	"github.com/cilium/tetragon/pkg/api/readyapi"
 )
 
-var (
-	procMonDLL         = syscall.NewLazyDLL("C:\\git\\ebpf-for-windows\\x64\\Debug\\process_monitor_dll.dll")
-	getEventFunc       = procMonDLL.NewProc("GetEvent")
-	startEventListener = procMonDLL.NewProc("StartEventListener")
-)
+type Record struct {
+	// The CPU this record was generated on.
+	CPU int
 
-func readNewRecord() (perf.Record, error) {
+	// The data submitted via bpf_perf_event_output.
+	// Due to a kernel bug, this can contain between 0 and 7 bytes of trailing
+	// garbage from the ring depending on the input sample's length.
+	RawSample []byte
+
+	// The number of samples which could not be output, since
+	// the ring buffer was full.
+	LostSamples uint64
+
+	// The minimum number of bytes remaining in the per-CPU buffer after this Record has been read.
+	// Negative for overwritable buffers.
+	Remaining int
+}
+
+func readNewRecord() (Record, error) {
 	buf := make([]byte, 2048)
-	getEventFunc.Call(uintptr(unsafe.Pointer(&buf[0])))
-	var record perf.Record
+	//getEventFunc.Call(uintptr(unsafe.Pointer(&buf[0])))
+	var record Record
 	record.CPU = 1
 	record.LostSamples = 0
 	record.Remaining = 1
@@ -41,7 +50,7 @@ func (k *Observer) RunEvents(stopCtx context.Context, ready func()) error {
 
 	// We spawn go routine to read and process perf events,
 	// connected with main app through eventsQueue channel.
-	eventsQueue := make(chan *perf.Record, k.getRBQueueSize())
+	eventsQueue := make(chan *Record, k.getRBQueueSize())
 
 	// Listeners are ready and about to start reading from perf reader, tell
 	// user everything is ready.
@@ -54,7 +63,6 @@ func (k *Observer) RunEvents(stopCtx context.Context, ready func()) error {
 
 	go func() {
 		defer wg.Done()
-		startEventListener.Call()
 	}()
 
 	go func() {

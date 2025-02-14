@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/vishvananda/netlink"
 	"go.uber.org/multierr"
@@ -21,6 +22,14 @@ type TcUnloader struct {
 type TcAttachment struct {
 	LinkName  string
 	IsIngress bool
+}
+
+// rawDetachUnloader can be used to unload cgroup and sockmap programs.
+type RawDetachUnloader struct {
+	TargetFD   int
+	Name       string
+	Prog       *ebpf.Program
+	AttachType ebpf.AttachType
 }
 
 func (tu TcUnloader) Unload(_ bool) error {
@@ -179,5 +188,18 @@ func (u *MultiRelinkUnloader) Relink() error {
 
 	u.Links = links
 	u.IsLinked = true
+	return nil
+}
+
+func (rdu *RawDetachUnloader) Unload(_ bool) error {
+	defer rdu.Prog.Close()
+	err := link.RawDetachProgram(link.RawDetachProgramOptions{
+		Target:  rdu.TargetFD,
+		Program: rdu.Prog,
+		Attach:  rdu.AttachType,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to detach %s: %w", rdu.Name, err)
+	}
 	return nil
 }

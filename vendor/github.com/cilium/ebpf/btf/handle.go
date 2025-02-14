@@ -6,10 +6,11 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"runtime"
 
 	"github.com/cilium/ebpf/internal"
+	"github.com/cilium/ebpf/internal/errno"
 	"github.com/cilium/ebpf/internal/sys"
-	"github.com/cilium/ebpf/internal/unix"
 )
 
 // Handle is a reference to BTF loaded into the kernel.
@@ -43,6 +44,10 @@ func NewHandle(b *Builder) (*Handle, error) {
 func NewHandleFromRawBTF(btf []byte) (*Handle, error) {
 	const minLogSize = 64 * 1024
 
+	if runtime.GOOS != "linux" {
+		return nil, fmt.Errorf("btf: handle: %w", internal.ErrNotSupportedOnOS)
+	}
+
 	if uint64(len(btf)) > math.MaxUint32 {
 		return nil, errors.New("BTF exceeds the maximum size")
 	}
@@ -68,7 +73,7 @@ func NewHandleFromRawBTF(btf []byte) (*Handle, error) {
 			break
 		}
 
-		if attr.BtfLogSize != 0 && !errors.Is(err, unix.ENOSPC) {
+		if attr.BtfLogSize != 0 && !errors.Is(err, errno.ENOSPC) {
 			// Up until at least kernel 6.0, the BTF verifier does not return ENOSPC
 			// if there are other verification errors. ENOSPC is only returned when
 			// the BTF blob is correct, a log was requested, and the provided buffer
@@ -110,6 +115,10 @@ func NewHandleFromRawBTF(btf []byte) (*Handle, error) {
 //
 // Requires CAP_SYS_ADMIN.
 func NewHandleFromID(id ID) (*Handle, error) {
+	if runtime.GOOS != "linux" {
+		return nil, fmt.Errorf("btf: handle: %w", internal.ErrNotSupportedOnOS)
+	}
+
 	fd, err := sys.BtfGetFdById(&sys.BtfGetFdByIdAttr{
 		Id: uint32(id),
 	})
@@ -131,6 +140,10 @@ func NewHandleFromID(id ID) (*Handle, error) {
 // base must contain type information for vmlinux if the handle is for
 // a kernel module. It may be nil otherwise.
 func (h *Handle) Spec(base *Spec) (*Spec, error) {
+	if runtime.GOOS != "linux" {
+		return nil, fmt.Errorf("btf: handle: %w", internal.ErrNotSupportedOnOS)
+	}
+
 	var btfInfo sys.BtfInfo
 	btfBuffer := make([]byte, h.size)
 	btfInfo.Btf, btfInfo.BtfSize = sys.NewSlicePointerLen(btfBuffer)
@@ -164,6 +177,10 @@ func (h *Handle) FD() int {
 
 // Info returns metadata about the handle.
 func (h *Handle) Info() (*HandleInfo, error) {
+	if runtime.GOOS != "linux" {
+		return nil, fmt.Errorf("btf: handle: %w", internal.ErrNotSupportedOnOS)
+	}
+
 	return newHandleInfoFromFD(h.fd)
 }
 
@@ -211,7 +228,7 @@ func newHandleInfoFromFD(fd *sys.FD) (*HandleInfo, error) {
 
 	return &HandleInfo{
 		ID:       ID(btfInfo.Id),
-		Name:     unix.ByteSliceToString(nameBuffer),
+		Name:     sys.ByteSliceToString(nameBuffer),
 		IsKernel: btfInfo.KernelBtf != 0,
 		size:     btfSize,
 	}, nil
@@ -242,6 +259,11 @@ type HandleIterator struct {
 // Returns true if another BTF object was found. Call [HandleIterator.Err] after
 // the function returns false.
 func (it *HandleIterator) Next() bool {
+	if runtime.GOOS != "linux" {
+		it.err = internal.ErrNotSupportedOnOS
+		return false
+	}
+
 	id := it.ID
 	for {
 		attr := &sys.BtfGetNextIdAttr{Id: id}

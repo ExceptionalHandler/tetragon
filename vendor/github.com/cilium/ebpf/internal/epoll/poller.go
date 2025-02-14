@@ -1,3 +1,5 @@
+//go:build linux
+
 package epoll
 
 import (
@@ -14,11 +16,7 @@ import (
 	"github.com/cilium/ebpf/internal/unix"
 )
 
-var (
-	ErrFlushed                   = errors.New("data was flushed")
-	errEpollWaitDeadlineExceeded = fmt.Errorf("epoll wait: %w", os.ErrDeadlineExceeded)
-	errEpollWaitClosed           = fmt.Errorf("epoll wait: %w", os.ErrClosed)
-)
+var ErrFlushed = errors.New("data was flushed")
 
 // Poller waits for readiness notifications from multiple file descriptors.
 //
@@ -48,7 +46,7 @@ func New() (_ *Poller, err error) {
 
 	epollFd, err := unix.EpollCreate1(unix.EPOLL_CLOEXEC)
 	if err != nil {
-		return nil, fmt.Errorf("create epoll fd: %w", err)
+		return nil, fmt.Errorf("create epoll fd: %v", err)
 	}
 	defer closeFDOnError(epollFd)
 
@@ -162,7 +160,7 @@ func (p *Poller) Wait(events []unix.EpollEvent, deadline time.Time) (int, error)
 	defer p.epollMu.Unlock()
 
 	if p.epollFd == -1 {
-		return 0, errEpollWaitClosed
+		return 0, fmt.Errorf("epoll wait: %w", os.ErrClosed)
 	}
 
 	for {
@@ -188,7 +186,7 @@ func (p *Poller) Wait(events []unix.EpollEvent, deadline time.Time) (int, error)
 		}
 
 		if n == 0 {
-			return 0, errEpollWaitDeadlineExceeded
+			return 0, fmt.Errorf("epoll wait: %w", os.ErrDeadlineExceeded)
 		}
 
 		for i := 0; i < n; {
@@ -197,7 +195,7 @@ func (p *Poller) Wait(events []unix.EpollEvent, deadline time.Time) (int, error)
 				// Since we don't read p.closeEvent the event is never cleared and
 				// we'll keep getting this wakeup until Close() acquires the
 				// lock and sets p.epollFd = -1.
-				return 0, errEpollWaitClosed
+				return 0, fmt.Errorf("epoll wait: %w", os.ErrClosed)
 			}
 			if int(event.Fd) == p.flushEvent.raw {
 				// read event to prevent it from continuing to wake
