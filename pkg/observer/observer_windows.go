@@ -5,11 +5,18 @@ package observer
 
 import (
 	"context"
+	"fmt"
 	"runtime"
 	"sync"
-	"time"
+	"unsafe"
 
+	"golang.org/x/sys/windows"
+
+	"github.com/cilium/ebpf"
+	"github.com/cilium/tetragon/pkg/api/ops"
+	"github.com/cilium/tetragon/pkg/api/processapi"
 	"github.com/cilium/tetragon/pkg/api/readyapi"
+	"github.com/cilium/tetragon/pkg/bpf"
 )
 
 type Record struct {
@@ -31,19 +38,50 @@ type Record struct {
 }
 
 func readNewRecord() (Record, error) {
-	buf := make([]byte, 2048)
-	//getEventFunc.Call(uintptr(unsafe.Pointer(&buf[0])))
-	var record Record
-	record.CPU = 1
-	record.LostSamples = 0
-	record.Remaining = 1
-	record.RawSample = buf
-	return record, nil
 
 }
 
-func (k *Observer) RunEvents(stopCtx context.Context, ready func()) error {
+type RecordStruct struct {
+	execEvent processapi.MsgExecveEvent
+	process   processapi.MsgProcess
+}
 
+func getRecordFromProcInfo(process_info *bpf.ProcessInfo, command_map *ebpf.Map) (Record, error) {
+	var record Record
+	var procEvent RecordStruct
+	procEvent.execEvent.Common.Op = ops.MSG_OP_EXECVE
+	procEvent.execEvent.Parent.Pid = process_info.CreatingProcessId
+	procEvent.process.PID = process_info.ProcessId
+	procEvent.process.Flags = 1
+	procEvent.process.NSPID = 0
+	procEvent.process.Size = uint32(unsafe.Offsetof(procEvent.process.Filename))
+	procEvent.process.Ktime = process_info.CreationTime
+	var path [1024]uint16
+	err := command_map.Lookup(process_info.ProcessId, &path)
+	if err == nil {
+		procEvent.process.Filename = windows.UTF16ToString(path[:])
+	}
+
+	procEvent.process.Size += uint32(len(procEvent.process.Filename))
+	record.CPU = 0
+	record.RawSample = &procEvent
+}
+
+func (k *Observer) RunEvents(stopCtx context.Context, ready func()) error {
+	pinOpts := ebpf.LoadPinOptions{}
+	ringBufMap, err := ebpf.LoadPinnedMap("__base__\\process_ringbuf", &pinOpts)
+	if err != nil {
+		return fmt.Errorf("opening pinned map __base__\\process_ringbuf failed: %w", err)
+	}
+	commandline_map, err := ebpf.LoadPinnedMap("__base__\\command_map", &pinOpts)
+	if err != nil {
+		return fmt.Errorf("opening pinned map __base__\\process_ringbuf failed: %w", err)
+	}
+	reader := bpf.GetNewWindowsRingBufReader()
+	err = reader.Init(ringBufMap.FD(), int(ringBufMap.MaxEntries()))
+	if err != nil {
+		return fmt.Errorf("Failed initing rinbuf reader", err)
+	}
 	// Inform caller that we're about to start processing events.
 	k.observerListeners(&readyapi.MsgTetragonReady{})
 	ready()
@@ -67,9 +105,13 @@ func (k *Observer) RunEvents(stopCtx context.Context, ready func()) error {
 
 	go func() {
 		defer wg.Done()
-		time.Sleep(1 * time.Second)
+
 		for stopCtx.Err() == nil {
-			record, err := readNewRecord()
+
+			var procInfo *bpf.ProcessInfo
+			procInfo, err := reader.GetNextProcess()
+
+			record, err := getRecordFromProcInfo(procInfo, commandline_map)
 			if err != nil {
 				if stopCtx.Err() == nil {
 					RingbufErrors.Inc()
