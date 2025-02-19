@@ -37,10 +37,6 @@ type Record struct {
 	Remaining int
 }
 
-func readNewRecord() (Record, error) {
-
-}
-
 type RecordStruct struct {
 	execEvent processapi.MsgExecveEvent
 	process   processapi.MsgProcess
@@ -57,28 +53,24 @@ func getRecordFromProcInfo(process_info *bpf.ProcessInfo, command_map *ebpf.Map)
 	procEvent.process.Size = uint32(unsafe.Offsetof(procEvent.process.Filename))
 	procEvent.process.Ktime = process_info.CreationTime
 	var path [1024]uint16
-	err := command_map.Lookup(process_info.ProcessId, &path)
-	if err == nil {
-		procEvent.process.Filename = windows.UTF16ToString(path[:])
-	}
+	command_map.Lookup(process_info.ProcessId, &path)
+	procEvent.process.Filename = windows.UTF16ToString(path[:])
 
 	procEvent.process.Size += uint32(len(procEvent.process.Filename))
-	record.CPU = 0
-	record.RawSample = &procEvent
+
+	copy(record.RawSample, *(*[]byte)(unsafe.Pointer(&procEvent)))
+	return record, nil
 }
 
 func (k *Observer) RunEvents(stopCtx context.Context, ready func()) error {
-	pinOpts := ebpf.LoadPinOptions{}
-	ringBufMap, err := ebpf.LoadPinnedMap("__base__\\process_ringbuf", &pinOpts)
-	if err != nil {
-		return fmt.Errorf("opening pinned map __base__\\process_ringbuf failed: %w", err)
+	coll := bpf.GetExecCollection()
+	if coll == nil {
+		return fmt.Errorf("Exec Preloaded collection is nil")
 	}
-	commandline_map, err := ebpf.LoadPinnedMap("__base__\\command_map", &pinOpts)
-	if err != nil {
-		return fmt.Errorf("opening pinned map __base__\\process_ringbuf failed: %w", err)
-	}
+	commandline_map := coll.Maps["command_map"]
+	ringBufMap := coll.Maps["process_ringbuf"]
 	reader := bpf.GetNewWindowsRingBufReader()
-	err = reader.Init(ringBufMap.FD(), int(ringBufMap.MaxEntries()))
+	err := reader.Init(ringBufMap.FD(), int(ringBufMap.MaxEntries()))
 	if err != nil {
 		return fmt.Errorf("Failed initing rinbuf reader", err)
 	}
@@ -107,10 +99,14 @@ func (k *Observer) RunEvents(stopCtx context.Context, ready func()) error {
 		defer wg.Done()
 
 		for stopCtx.Err() == nil {
-
-			var procInfo *bpf.ProcessInfo
 			procInfo, err := reader.GetNextProcess()
-
+			if err != nil {
+				k.log.WithField("NewError ", 0).WithError(err).Warn("Reading bpf events failed")
+				break
+			}
+			if procInfo.Operation != 0 {
+				continue
+			}
 			record, err := getRecordFromProcInfo(procInfo, commandline_map)
 			if err != nil {
 				if stopCtx.Err() == nil {

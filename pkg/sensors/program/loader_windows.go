@@ -491,7 +491,7 @@ func doLoadProgram(
 		logger.GetLogger().WithError(err).WithField("Error ", err.Error()).Warn(" Failed to load Native Windows Collection ")
 		return nil, err
 	}
-	defer coll.Close()
+	bpf.SetExecCollection(coll)
 
 	collMaps := map[ebpf.MapID]*ebpf.Map{}
 	// we need a mapping by ID
@@ -509,13 +509,16 @@ func doLoadProgram(
 		}
 		collMaps[id] = m
 
-		if _, exist := load.PinMap[info.Name]; exist {
-			pinPath := info.Name
-			err = m.Pin(pinPath)
-			if err != nil {
-				logger.GetLogger().WithField("map", m.String()).Warn("failed to pin map")
-			}
-		}
+		//ToDo: Uncomment after map pinning issue is fixed
+		// if _, exist := load.PinMap[info.Name]; exist {
+		// 	pinPath := load.Attach + "::" + info.Name
+		// 	err = m.Pin(pinPath)
+		// 	if err != nil {
+		// 		logger.GetLogger().WithField("map", m.String()).Warn("failed to pin map")
+		// 	} else {
+		// 		logger.GetLogger().WithField("map tp path  ", pinPath).Info("Successfully pinned")
+		// 	}
+		// }
 	}
 
 	load.LoadedMapsInfo = map[int]bpf.ExtendedMapInfo{}
