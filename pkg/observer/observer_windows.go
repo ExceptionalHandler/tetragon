@@ -10,14 +10,122 @@ import (
 	"sync"
 	"unsafe"
 
-	"golang.org/x/sys/windows"
-
 	"github.com/cilium/ebpf"
 	"github.com/cilium/tetragon/pkg/api/ops"
-	"github.com/cilium/tetragon/pkg/api/processapi"
 	"github.com/cilium/tetragon/pkg/api/readyapi"
 	"github.com/cilium/tetragon/pkg/bpf"
+	"golang.org/x/sys/windows"
 )
+
+// process_info_t struct
+type ProcessInfo struct {
+	ProcessID         uint32
+	ParentProcessID   uint32
+	CreatingProcessID uint32
+	CreatingThreadID  uint32
+	CreationTime      uint64
+	ExitTime          uint64
+	ProcessExitCode   uint32
+	Operation         uint8
+}
+
+// msg_process struct
+type MsgProcess struct {
+	Size       uint32
+	PID        uint32
+	TID        uint32
+	NSPID      uint32
+	SecureExec uint32
+	UID        uint32
+	AUID       uint32
+	Flags      uint32
+	INlink     uint32
+	Pad        uint32
+	IIno       uint64
+	Ktime      uint64
+	Args       [2048]byte // Adjust size as needed
+}
+
+// msg_k8s struct
+type MsgK8s struct {
+	Cgrpid        uint64
+	CgrpTrackerID uint64
+	DockerID      [128]byte
+}
+
+// msg_execve_key struct
+type MsgExecveKey struct {
+	PID   uint32
+	Pad   [4]byte
+	Ktime uint64
+}
+
+// msg_capabilities struct
+type MsgCapabilities struct {
+	Permitted   uint64
+	Effective   uint64
+	Inheritable uint64
+}
+
+// msg_user_namespace struct
+type MsgUserNamespace struct {
+	Level  int32
+	UID    uint32
+	GID    uint32
+	NSInum uint32
+}
+
+// msg_cred struct
+type MsgCred struct {
+	UID        uint32
+	GID        uint32
+	SUID       uint32
+	SGID       uint32
+	EUID       uint32
+	EGID       uint32
+	FSUID      uint32
+	FSGID      uint32
+	SecureBits uint32
+	Pad        uint32
+	Caps       MsgCapabilities
+	UserNS     MsgUserNamespace
+}
+
+// msg_ns struct
+type MsgNS struct {
+	UTSInum             uint32
+	IPCInum             uint32
+	MNTInum             uint32
+	PIDInum             uint32
+	PIDForChildrenInum  uint32
+	NetInum             uint32
+	TimeInum            uint32
+	TimeForChildrenInum uint32
+	CgroupInum          uint32
+	UserInum            uint32
+}
+
+// msg_common struct
+type MsgCommon struct {
+	Op    uint8
+	Flags uint8
+	Pad   [2]byte
+	Size  uint32
+	Ktime uint64
+}
+
+// msg_execve_event struct
+type MsgExecveEvent struct {
+	Common      MsgCommon
+	Kube        MsgK8s
+	Parent      MsgExecveKey
+	ParentFlags uint64
+	Creds       MsgCred
+	NS          MsgNS
+	CleanupKey  MsgExecveKey
+	Process     MsgProcess
+	Buffer      [1024 + 256 + 56 + 56 + 256]byte
+}
 
 type Record struct {
 	// The CPU this record was generated on.
@@ -38,27 +146,43 @@ type Record struct {
 }
 
 type RecordStruct struct {
-	execEvent processapi.MsgExecveEvent
-	process   processapi.MsgProcess
+	execEvent MsgExecveEvent
 }
 
-func getRecordFromProcInfo(process_info *bpf.ProcessInfo, command_map *ebpf.Map) (Record, error) {
+func getRecordFromProcInfo(process_info *bpf.ProcessInfo, command_map *ebpf.Map, imageMap *ebpf.Map) (Record, error) {
+	// Create record struct
 	var record Record
+
 	var procEvent RecordStruct
 	procEvent.execEvent.Common.Op = ops.MSG_OP_EXECVE
-	procEvent.execEvent.Parent.Pid = process_info.CreatingProcessId
-	procEvent.process.PID = process_info.ProcessId
-	procEvent.process.Flags = 1
-	procEvent.process.NSPID = 0
-	procEvent.process.Size = uint32(unsafe.Offsetof(procEvent.process.Filename))
-	procEvent.process.Ktime = process_info.CreationTime
-	var path [1024]uint16
-	command_map.Lookup(process_info.ProcessId, &path)
-	procEvent.process.Filename = windows.UTF16ToString(path[:])
+	procEvent.execEvent.Parent.PID = process_info.CreatingProcessId
+	procEvent.execEvent.Process.PID = process_info.ProcessId
+	procEvent.execEvent.Process.TID = process_info.ProcessId
+	procEvent.execEvent.Process.Flags = 1
+	procEvent.execEvent.Process.NSPID = 0
+	procEvent.execEvent.Process.Size = uint32(unsafe.Offsetof(procEvent.execEvent.Process.Args))
+	procEvent.execEvent.Process.Ktime = process_info.CreationTime
 
-	procEvent.process.Size += uint32(len(procEvent.process.Filename))
+	var wideCmd [2048]uint16
+	command_map.Lookup(process_info.ProcessId, &wideCmd)
+	strCmd := windows.UTF16ToString(wideCmd[:])
 
-	copy(record.RawSample, *(*[]byte)(unsafe.Pointer(&procEvent)))
+	var wideImagePath [1024]byte
+	imageMap.Lookup(process_info.ProcessId, &wideImagePath)
+	var s *uint16
+	s = (*uint16)(unsafe.Pointer(&wideImagePath[0]))
+	strImagePath := windows.UTF16PtrToString(s)
+
+	strImagePath += string(uint8(0))
+	strImagePath += strCmd
+	copy(procEvent.execEvent.Process.Args[:], strImagePath)
+	procEvent.execEvent.Process.Size += uint32(len(strImagePath))
+
+	bufSize := int(unsafe.Sizeof(procEvent)) + len(strImagePath)
+	record.RawSample = make([]byte, bufSize)
+	record.CPU = 0
+	copyBuf := unsafe.Slice((*byte)(unsafe.Pointer(&procEvent)), bufSize)
+	copy(record.RawSample, copyBuf)
 	return record, nil
 }
 
@@ -69,6 +193,7 @@ func (k *Observer) RunEvents(stopCtx context.Context, ready func()) error {
 	}
 	commandline_map := coll.Maps["command_map"]
 	ringBufMap := coll.Maps["process_ringbuf"]
+	imageMap := coll.Maps["process_map"]
 	reader := bpf.GetNewWindowsRingBufReader()
 	err := reader.Init(ringBufMap.FD(), int(ringBufMap.MaxEntries()))
 	if err != nil {
@@ -107,7 +232,7 @@ func (k *Observer) RunEvents(stopCtx context.Context, ready func()) error {
 			if procInfo.Operation != 0 {
 				continue
 			}
-			record, err := getRecordFromProcInfo(procInfo, commandline_map)
+			record, err := getRecordFromProcInfo(procInfo, commandline_map, imageMap)
 			if err != nil {
 				if stopCtx.Err() == nil {
 					RingbufErrors.Inc()

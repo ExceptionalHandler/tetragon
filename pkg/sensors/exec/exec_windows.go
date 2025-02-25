@@ -7,10 +7,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"unsafe"
 
-	"github.com/cilium/tetragon/pkg/api"
-	"github.com/cilium/tetragon/pkg/api/dataapi"
 	"github.com/cilium/tetragon/pkg/api/ops"
 	"github.com/cilium/tetragon/pkg/api/processapi"
 	"github.com/cilium/tetragon/pkg/cgrouprate"
@@ -69,63 +66,12 @@ func execParse(reader *bytes.Reader) (processapi.MsgProcess, bool, error) {
 		return proc, false, err
 	}
 
-	if exec.Flags&api.EventDataFilename != 0 {
-		var desc dataapi.DataEventDesc
-
-		dr := bytes.NewReader(args)
-
-		if err := binary.Read(dr, binary.LittleEndian, &desc); err != nil {
-			proc.Size = processapi.MSG_SIZEOF_EXECVE
-			proc.Args = "enomem enomem"
-			proc.Filename = "enomem"
-			return proc, false, err
-		}
-		data, err := observer.DataGet(desc)
-		if err != nil {
-			return proc, false, err
-		}
-		proc.Filename = strutils.UTF8FromBPFBytes(data[:])
-		args = args[unsafe.Sizeof(desc):]
-	} else if exec.Flags&api.EventErrorFilename == 0 {
-		n := bytes.Index(args, []byte{0x00})
-		if n != -1 {
-			proc.Filename = strutils.UTF8FromBPFBytes(args[:n])
-			args = args[n+1:]
-		}
+	n := bytes.Index(args, []byte{0x00})
+	if n != -1 {
+		proc.Filename = strutils.UTF8FromBPFBytes(args[:n])
+		args = args[n+1:]
 	}
-
-	var cmdArgs [][]byte
-
-	if exec.Flags&api.EventDataArgs != 0 {
-		var desc dataapi.DataEventDesc
-
-		dr := bytes.NewReader(args)
-
-		if err := binary.Read(dr, binary.LittleEndian, &desc); err != nil {
-			proc.Size = processapi.MSG_SIZEOF_EXECVE
-			proc.Args = "enomem enomem"
-			proc.Filename = "enomem"
-			return proc, false, err
-		}
-		data, err := observer.DataGet(desc)
-		if err != nil {
-			return proc, false, err
-		}
-		// cut the zero byte
-		if len(data) > 0 {
-			n := len(data) - 1
-			cmdArgs = bytes.Split(data[:n], []byte{0x00})
-		}
-
-		cwd := args[unsafe.Sizeof(desc):]
-		cmdArgs = append(cmdArgs, cwd)
-	} else {
-		// no arguments, args should have just cwd
-		// reading it with split to get [][]byte type
-		cmdArgs = bytes.Split(args, []byte{0x00})
-	}
-
-	proc.Args = strutils.UTF8FromBPFBytes(bytes.Join(cmdArgs[0:], []byte{0x00}))
+	proc.Args = strutils.UTF8FromBPFBytes(args)
 	return proc, false, nil
 }
 
