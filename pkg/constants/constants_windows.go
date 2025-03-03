@@ -16,4 +16,5 @@ const (
 	AF_IRDA              = windows.AF_IRDA
 	AF_BTH               = windows.AF_BTH
 	CGROUP2_SUPER_MAGIC  = 0x63677270
+	BPF_STATS_RUN_TIME   = 0
 )
