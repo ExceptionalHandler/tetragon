@@ -7,7 +7,9 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"strings"
 
+	"github.com/cilium/tetragon/pkg/api"
 	"github.com/cilium/tetragon/pkg/api/ops"
 	"github.com/cilium/tetragon/pkg/api/processapi"
 	"github.com/cilium/tetragon/pkg/cgrouprate"
@@ -68,10 +70,17 @@ func execParse(reader *bytes.Reader) (processapi.MsgProcess, bool, error) {
 
 	n := bytes.Index(args, []byte{0x00})
 	if n != -1 {
-		proc.Filename = strutils.UTF8FromBPFBytes(args[:n])
+		proc.Filename = strings.TrimPrefix(strutils.UTF8FromBPFBytes(args[:n]), "\\??\\")
 		args = args[n+1:]
 	}
-	proc.Args = strutils.UTF8FromBPFBytes(args)
+	remFileName := proc.Filename
+	if args[0] == '"' {
+		remFileName = "\"" + proc.Filename + "\""
+	}
+
+	proc.Args = strings.TrimPrefix(strutils.UTF8FromBPFBytes(args), remFileName)
+	proc.Args = strings.TrimPrefix(proc.Args, " ")
+	proc.Flags = api.EventNoCWDSupport
 	return proc, false, nil
 }
 
