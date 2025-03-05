@@ -127,6 +127,17 @@ type MsgExecveEvent struct {
 	Buffer      [1024 + 256 + 56 + 56 + 256]byte
 }
 
+type ExitInfo struct {
+	Code uint32
+	Tid  uint32
+}
+
+type MsgExit struct {
+	Common MsgCommon
+	Curent MsgExecveKey
+	Info   ExitInfo
+}
+
 type Record struct {
 	// The CPU this record was generated on.
 	CPU int
@@ -149,7 +160,23 @@ type RecordStruct struct {
 	execEvent MsgExecveEvent
 }
 
-func getRecordFromProcInfo(process_info *bpf.ProcessInfo, command_map *ebpf.Map, imageMap *ebpf.Map) (Record, error) {
+func getExitRecordFromProcInfo(process_info *bpf.ProcessInfo) (Record, error) {
+	var record Record
+
+	var exitEvent MsgExit
+	exitEvent.Common.Op = ops.MSG_OP_EXIT
+	exitEvent.Curent.PID = process_info.ProcessId
+	exitEvent.Curent.Ktime = process_info.ExitTime
+	exitEvent.Info.Code = process_info.ProcessExitCode
+	exitEvent.Info.Tid = process_info.ProcessId
+	record.RawSample = make([]byte, unsafe.Sizeof(exitEvent))
+	record.CPU = 0
+	copyBuf := unsafe.Slice((*byte)(unsafe.Pointer(&exitEvent)), unsafe.Sizeof(exitEvent))
+	copy(record.RawSample, copyBuf)
+	return record, nil
+}
+
+func getExecRecordFromProcInfo(process_info *bpf.ProcessInfo, command_map *ebpf.Map, imageMap *ebpf.Map) (Record, error) {
 	// Create record struct
 	var record Record
 
@@ -224,15 +251,17 @@ func (k *Observer) RunEvents(stopCtx context.Context, ready func()) error {
 		defer wg.Done()
 
 		for stopCtx.Err() == nil {
+			var record Record
 			procInfo, err := reader.GetNextProcess()
 			if err != nil {
 				k.log.WithField("NewError ", 0).WithError(err).Warn("Reading bpf events failed")
 				break
 			}
 			if procInfo.Operation != 0 {
-				continue
+				record, err = getExitRecordFromProcInfo(procInfo)
+			} else {
+				record, err = getExecRecordFromProcInfo(procInfo, commandline_map, imageMap)
 			}
-			record, err := getRecordFromProcInfo(procInfo, commandline_map, imageMap)
 			if err != nil {
 				if stopCtx.Err() == nil {
 					RingbufErrors.Inc()
