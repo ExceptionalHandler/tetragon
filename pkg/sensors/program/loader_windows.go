@@ -35,21 +35,6 @@ func linkPinPath(bpfDir string, load *Program, extra ...string) string {
 	return pinPath
 }
 
-func linkPin(lnk link.Link, bpfDir string, load *Program, extra ...string) error {
-	// pinned link is not supported
-	if !bpf.HasLinkPin() {
-		return nil
-	}
-
-	pinPath := linkPinPath(bpfDir, load, extra...)
-
-	err := lnk.Pin(pinPath)
-	if err != nil {
-		return fmt.Errorf("pinning link '%s' failed: %w", pinPath, err)
-	}
-	return nil
-}
-
 func RawAttach(targetFD int) AttachFunc {
 	return RawAttachWithFlags(targetFD, 0)
 }
@@ -58,7 +43,7 @@ func RawAttachWithFlags(targetFD int, flags uint32) AttachFunc {
 	return func(_ *ebpf.Collection, _ *ebpf.CollectionSpec,
 		prog *ebpf.Program, spec *ebpf.ProgramSpec) (unloader.Unloader, error) {
 
-		return nil, fmt.Errorf("windows not supported")
+		return nil, fmt.Errorf("not supported on windows")
 	}
 }
 
@@ -66,7 +51,7 @@ func TracepointAttach(load *Program, bpfDir string) AttachFunc {
 	return func(_ *ebpf.Collection, _ *ebpf.CollectionSpec,
 		prog *ebpf.Program, spec *ebpf.ProgramSpec) (unloader.Unloader, error) {
 
-		return nil, fmt.Errorf("windows not supported")
+		return nil, fmt.Errorf("not supported on windows")
 	}
 }
 
@@ -74,44 +59,20 @@ func RawTracepointAttach(load *Program) AttachFunc {
 	return func(_ *ebpf.Collection, _ *ebpf.CollectionSpec,
 		prog *ebpf.Program, spec *ebpf.ProgramSpec) (unloader.Unloader, error) {
 
-		return nil, fmt.Errorf("windows not supported")
+		return nil, fmt.Errorf("not supported on windows")
 
-	}
-}
-
-func disableProg(coll *ebpf.CollectionSpec, name string) {
-	if spec, ok := coll.Programs[name]; ok {
-		spec.Type = ebpf.UnspecifiedProgram
 	}
 }
 
 func KprobeOpen(load *Program) OpenFunc {
 	return func(coll *ebpf.CollectionSpec) error {
-		// The generic_kprobe_override program is part of bpf_generic_kprobe.o object,
-		// so let's disable it if the override is not configured. Otherwise it gets
-		// loaded and bpftool will show it.
-		if !load.Override {
-			disableProg(coll, "generic_kprobe_override")
-			disableProg(coll, "generic_fmodret_override")
-		} else {
-			if load.OverrideFmodRet {
-				spec, ok := coll.Programs["generic_fmodret_override"]
-				if !ok {
-					return fmt.Errorf("failed to find generic_fmodret_override")
-				}
-				spec.AttachTo = load.Attach
-				disableProg(coll, "generic_kprobe_override")
-			} else {
-				disableProg(coll, "generic_fmodret_override")
-			}
-		}
-		return nil
+		return fmt.Errorf("not supported on windows")
 	}
 }
 
 func kprobeAttach(load *Program, prog *ebpf.Program, spec *ebpf.ProgramSpec,
 	symbol string, bpfDir string, extra ...string) (unloader.Unloader, error) {
-	return nil, fmt.Errorf("windows not supported")
+	return nil, fmt.Errorf("not supported on windows")
 }
 
 func windowsAttach(load *Program, prog *ebpf.Program, spec *ebpf.ProgramSpec,
@@ -135,45 +96,6 @@ func windowsAttach(load *Program, prog *ebpf.Program, spec *ebpf.ProgramSpec,
 
 }
 
-func kprobeAttachOverride(load *Program, bpfDir string,
-	coll *ebpf.Collection, collSpec *ebpf.CollectionSpec) error {
-
-	spec, ok := collSpec.Programs["generic_kprobe_override"]
-	if !ok {
-		return fmt.Errorf("spec for generic_kprobe_override program not found")
-	}
-
-	prog, ok := coll.Programs["generic_kprobe_override"]
-	if !ok {
-		return fmt.Errorf("program generic_kprobe_override not found")
-	}
-
-	prog, err := prog.Clone()
-	if err != nil {
-		return fmt.Errorf("failed to clone generic_kprobe_override program: %w", err)
-	}
-
-	pinPath := filepath.Join(bpfDir, load.PinPath, "prog_override")
-
-	if err := prog.Pin(pinPath); err != nil {
-		return fmt.Errorf("pinning '%s' to '%s' failed: %w", load.Label, pinPath, err)
-	}
-
-	load.unloaderOverride, err = kprobeAttach(load, prog, spec, load.Attach, bpfDir, "override")
-	if err != nil {
-		logger.GetLogger().Warnf("Failed to attach override program: %w", err)
-	}
-
-	return nil
-}
-
-func fmodretAttachOverride(load *Program, bpfDir string,
-	coll *ebpf.Collection, collSpec *ebpf.CollectionSpec) error {
-
-	return fmt.Errorf("windows not supported")
-
-}
-
 func WindowsAttach(load *Program, bpfDir string) AttachFunc {
 	return func(coll *ebpf.Collection, collSpec *ebpf.CollectionSpec,
 		prog *ebpf.Program, spec *ebpf.ProgramSpec) (unloader.Unloader, error) {
@@ -186,18 +108,6 @@ func KprobeAttach(load *Program, bpfDir string) AttachFunc {
 	return func(coll *ebpf.Collection, collSpec *ebpf.CollectionSpec,
 		prog *ebpf.Program, spec *ebpf.ProgramSpec) (unloader.Unloader, error) {
 
-		if load.Override {
-			if load.OverrideFmodRet {
-				if err := fmodretAttachOverride(load, bpfDir, coll, collSpec); err != nil {
-					return nil, err
-				}
-			} else {
-				if err := kprobeAttachOverride(load, bpfDir, coll, collSpec); err != nil {
-					return nil, err
-				}
-			}
-		}
-
 		return kprobeAttach(load, prog, spec, load.Attach, bpfDir)
 	}
 }
@@ -205,7 +115,7 @@ func KprobeAttach(load *Program, bpfDir string) AttachFunc {
 func UprobeAttach(load *Program) AttachFunc {
 	return func(_ *ebpf.Collection, _ *ebpf.CollectionSpec,
 		prog *ebpf.Program, spec *ebpf.ProgramSpec) (unloader.Unloader, error) {
-		return nil, fmt.Errorf("windows not supported")
+		return nil, fmt.Errorf("not supported on windows")
 
 	}
 }
@@ -213,7 +123,7 @@ func UprobeAttach(load *Program) AttachFunc {
 func MultiUprobeAttach(load *Program) AttachFunc {
 	return func(_ *ebpf.Collection, _ *ebpf.CollectionSpec,
 		prog *ebpf.Program, spec *ebpf.ProgramSpec) (unloader.Unloader, error) {
-		return nil, fmt.Errorf("windows not supported")
+		return nil, fmt.Errorf("not supported on windows")
 
 	}
 }
@@ -232,34 +142,27 @@ func NoAttach() AttachFunc {
 func TracingAttach() AttachFunc {
 	return func(_ *ebpf.Collection, _ *ebpf.CollectionSpec,
 		prog *ebpf.Program, spec *ebpf.ProgramSpec) (unloader.Unloader, error) {
-		return nil, fmt.Errorf("windows not supported")
+		return nil, fmt.Errorf("not supported on windows")
 	}
 }
 
 func LSMOpen(load *Program) OpenFunc {
 	return func(coll *ebpf.CollectionSpec) error {
-		for _, prog := range coll.Programs {
-			if prog.AttachType == ebpf.AttachLSMMac {
-				prog.AttachTo = load.Attach
-			} else {
-				return fmt.Errorf("Only AttachLSMMac is supported for generic_lsm programs")
-			}
-		}
-		return nil
+		return fmt.Errorf("not supported on windows")
 	}
 }
 
 func LSMAttach() AttachFunc {
 	return func(_ *ebpf.Collection, _ *ebpf.CollectionSpec,
 		prog *ebpf.Program, spec *ebpf.ProgramSpec) (unloader.Unloader, error) {
-		return nil, fmt.Errorf("windows not supported")
+		return nil, fmt.Errorf("not supported on windows")
 	}
 }
 
 func MultiKprobeAttach(load *Program, bpfDir string) AttachFunc {
 	return func(coll *ebpf.Collection, collSpec *ebpf.CollectionSpec,
 		prog *ebpf.Program, spec *ebpf.ProgramSpec) (unloader.Unloader, error) {
-		return nil, fmt.Errorf("windows not supported")
+		return nil, fmt.Errorf("not supported on windows")
 
 	}
 }
@@ -338,7 +241,7 @@ func LoadMultiKprobeProgram(bpfDir string, load *Program, verbose int) error {
 }
 
 func LoadFmodRetProgram(bpfDir string, load *Program, progName string, verbose int) error {
-	return fmt.Errorf("windows not supported")
+	return fmt.Errorf("not supported on windows")
 }
 
 func LoadTracingProgram(bpfDir string, load *Program, verbose int) error {
@@ -370,79 +273,6 @@ func LoadMultiUprobeProgram(bpfDir string, load *Program, verbose int) error {
 	return loadProgram(bpfDir, load, opts, verbose)
 }
 
-func slimVerifierError(errStr string) string {
-	// The error is potentially up to 'verifierLogBufferSize' bytes long,
-	// and most of it is not interesting. For a user-friendly output, we'll
-	// only keep the first and last N lines.
-
-	nLines := 30
-	headLines := 0
-	headEnd := 0
-
-	for ; headEnd < len(errStr); headEnd++ {
-		c := errStr[headEnd]
-		if c == '\n' {
-			headLines++
-			if headLines >= nLines {
-				break
-			}
-		}
-	}
-
-	tailStart := len(errStr) - 1
-	tailLines := 0
-	for ; tailStart > headEnd; tailStart-- {
-		c := errStr[tailStart]
-		if c == '\n' {
-			tailLines++
-			if tailLines >= nLines {
-				tailStart++
-				break
-			}
-		}
-	}
-
-	return errStr[:headEnd] + "\n...\n" + errStr[tailStart:]
-}
-
-func installTailCalls(bpfDir string, spec *ebpf.CollectionSpec, coll *ebpf.Collection, load *Program) error {
-	// FIXME(JM): This should be replaced by using the cilium/ebpf prog array initialization.
-
-	secToProgName := make(map[string]string)
-	for name, prog := range spec.Programs {
-		secToProgName[prog.SectionName] = name
-	}
-
-	install := func(pinPath string, secPrefix string) error {
-		tailCallsMap, err := ebpf.LoadPinnedMap(filepath.Join(bpfDir, pinPath), nil)
-		if err != nil {
-			return nil
-		}
-		defer tailCallsMap.Close()
-
-		for i := 0; i < 13; i++ {
-			secName := fmt.Sprintf("%s/%d", secPrefix, i)
-			if progName, ok := secToProgName[secName]; ok {
-				if prog, ok := coll.Programs[progName]; ok {
-					err := tailCallsMap.Update(uint32(i), uint32(prog.FD()), ebpf.UpdateAny)
-					if err != nil {
-						return fmt.Errorf("update of tail-call map '%s' failed: %w", pinPath, err)
-					}
-				}
-			}
-		}
-		return nil
-	}
-
-	if load.TcMap != nil {
-		if err := install(load.TcMap.PinPath, load.TcPrefix); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 // MissingConstantsError is returned by [rewriteConstants].
 type MissingConstantsError struct {
 	// The constants missing from .rodata.
@@ -451,32 +281,6 @@ type MissingConstantsError struct {
 
 func (m *MissingConstantsError) Error() string {
 	return fmt.Sprintf("some constants are missing from .rodata: %s", strings.Join(m.Constants, ", "))
-}
-
-func rewriteConstants(spec *ebpf.CollectionSpec, consts map[string]interface{}) error {
-	var missing []string
-
-	for n, c := range consts {
-		v, ok := spec.Variables[n]
-		if !ok {
-			missing = append(missing, n)
-			continue
-		}
-
-		if !v.Constant() {
-			return fmt.Errorf("variable %s is not a constant", n)
-		}
-
-		if err := v.Set(c); err != nil {
-			return fmt.Errorf("rewriting constant %s: %w", n, err)
-		}
-	}
-
-	if len(missing) != 0 {
-		return fmt.Errorf("rewrite constants: %w", &MissingConstantsError{Constants: missing})
-	}
-
-	return nil
 }
 
 func doLoadProgram(

@@ -223,12 +223,7 @@ var (
 	// list of registers loaders, see registerProbeType()
 	registeredProbeLoad = map[string]probeLoader{}
 	standardTypes       = map[string]func(string, *program.Program, int) error{
-		"tracepoint":     program.LoadTracepointProgram,
-		"raw_tracepoint": program.LoadRawTracepointProgram,
-		"raw_tp":         program.LoadRawTracepointProgram,
-		"kprobe":         program.LoadKprobeProgram,
-		"windows":        program.LoadWindowsProgram,
-		"lsm":            program.LoadLSMProgram,
+		"windows": program.LoadWindowsProgram,
 	}
 )
 

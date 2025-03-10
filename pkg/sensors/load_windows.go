@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/cilium/ebpf"
 	"github.com/cilium/tetragon/pkg/kernels"
 	"github.com/cilium/tetragon/pkg/logger"
 	"github.com/cilium/tetragon/pkg/option"
@@ -23,27 +22,13 @@ const (
 	BPF_PROG_TYPE_UNSPEC                  = 0
 	BPF_PROG_TYPE_SOCKET_FILTER           = 1
 	BPF_PROG_TYPE_KPROBE                  = 2
-	BPF_PROG_TYPE_SCHED_CLS               = 3
-	BPF_PROG_TYPE_SCHED_ACT               = 4
 	BPF_PROG_TYPE_TRACEPOINT              = 5
 	BPF_PROG_TYPE_XDP                     = 6
 	BPF_PROG_TYPE_PERF_EVENT              = 7
-	BPF_PROG_TYPE_CGROUP_SKB              = 8
-	BPF_PROG_TYPE_CGROUP_SOCK             = 9
-	BPF_PROG_TYPE_LWT_IN                  = 10
-	BPF_PROG_TYPE_LWT_OUT                 = 11
-	BPF_PROG_TYPE_LWT_XMIT                = 12
 	BPF_PROG_TYPE_SOCK_OPS                = 13
-	BPF_PROG_TYPE_SK_SKB                  = 14
-	BPF_PROG_TYPE_CGROUP_DEVICE           = 15
 	BPF_PROG_TYPE_SK_MSG                  = 16
 	BPF_PROG_TYPE_RAW_TRACEPOINT          = 17
-	BPF_PROG_TYPE_CGROUP_SOCK_ADDR        = 18
-	BPF_PROG_TYPE_LWT_SEG6LOCAL           = 19
-	BPF_PROG_TYPE_LIRC_MODE2              = 20
-	BPF_PROG_TYPE_SK_REUSEPORT            = 21
 	BPF_PROG_TYPE_FLOW_DISSECTOR          = 22
-	BPF_PROG_TYPE_CGROUP_SYSCTL           = 23
 	BPF_PROG_TYPE_RAW_TRACEPOINT_WRITABLE = 24
 	BPF_PROG_TYPE_CGROUP_SOCKOPT          = 25
 	BPF_PROG_TYPE_TRACING                 = 26
@@ -54,7 +39,11 @@ const (
 
 // LoadConfig loads the default sensor, including any from the configuration file.
 func LoadConfig(bpfDir string, sens []*Sensor) error {
-	return fmt.Errorf("tetragon, aborting could not load BPF programs:")
+	load := mergeSensors(sens)
+	if err := load.Load(bpfDir); err != nil {
+		return fmt.Errorf("tetragon, aborting could not load BPF programs: %w", err)
+	}
+	return nil
 }
 
 func (s *Sensor) policyDir() string {
@@ -158,7 +147,6 @@ func (s *Sensor) Load(bpfDir string) (err error) {
 		p.LoadState.RefInc()
 		loadedProgs = append(loadedProgs, p)
 		l.WithField("prog", p.Name).WithField("label", p.Label).Debugf("BPF prog was loaded")
-
 	}
 
 	// Add the *loaded* programs and maps, so they can be unloaded later
@@ -284,95 +272,6 @@ func (s *Sensor) FindPrograms() error {
 	return nil
 }
 
-func (s *Sensor) setMapPinPath(m *program.Map) {
-	policy := s.policyDir()
-	switch m.Type {
-	case program.MapTypeGlobal:
-		m.PinPath = filepath.Join(m.Name)
-	case program.MapTypePolicy:
-		m.PinPath = filepath.Join(policy, m.Name)
-	case program.MapTypeSensor:
-		m.PinPath = filepath.Join(policy, s.Name, m.Name)
-	case program.MapTypeProgram:
-		m.PinPath = filepath.Join(policy, s.Name, m.Prog.PinName, m.Name)
-	}
-}
-
-// loadMap loads BPF map in the sensor.
-func (s *Sensor) loadMap(bpfDir string, m *program.Map) error {
-	l := logger.GetLogger()
-	if m.PinState.IsLoaded() {
-		l.WithFields(logrus.Fields{
-			"sensor": s.Name,
-			"map":    m.Name,
-		}).Info("map is already loaded, incrementing reference count")
-		m.PinState.RefInc()
-		return nil
-	}
-
-	spec, err := ebpf.LoadCollectionSpec(m.Prog.Name)
-	if err != nil {
-		return fmt.Errorf("failed to open collection '%s': %w", m.Prog.Name, err)
-	}
-	mapSpec, ok := spec.Maps[m.Name]
-	if !ok {
-		return fmt.Errorf("map '%s' not found from '%s'", m.Name, m.Prog.Name)
-	}
-
-	s.setMapPinPath(m)
-	pinPath := filepath.Join(bpfDir, m.PinPath)
-
-	if m.IsOwner() {
-		// If map is the owner we set configured maximum entries
-		// directly to map spec.
-		if maximum, ok := m.GetMaxEntries(); ok {
-			mapSpec.MaxEntries = maximum
-		}
-
-		if innerMax, ok := m.GetMaxInnerEntries(); ok {
-			if innerMs := mapSpec.InnerMap; innerMs != nil {
-				mapSpec.InnerMap.MaxEntries = innerMax
-			}
-		}
-	} else {
-		// If map is NOT the owner we follow the maximum entries
-		// of the pinned map and update the spec with that.
-		maximum, err := program.GetMaxEntriesPinnedMap(pinPath)
-		if err != nil {
-			return err
-		}
-		mapSpec.MaxEntries = maximum
-
-		// 'm' is not the owner but for some reason requires maximum
-		// entries setup, make sure it matches the pinned map.
-		if maximum, ok := m.GetMaxEntries(); ok {
-			if mapSpec.MaxEntries != maximum {
-				return fmt.Errorf("failed to load map '%s' max entries mismatch: %d %d",
-					m.Name, mapSpec.MaxEntries, maximum)
-			}
-		}
-
-		m.SetMaxEntries(int(maximum))
-	}
-
-	// Disable content loading at this point, we just care about the map,
-	// the content will be loaded when the whole object gets loaded.
-	mapSpec.Contents = nil
-
-	if err := m.LoadOrCreatePinnedMap(pinPath, mapSpec); err != nil {
-		return fmt.Errorf("failed to load map '%s' for sensor '%s': %w", m.Name, s.Name, err)
-	}
-
-	l.WithFields(logrus.Fields{
-		"sensor": s.Name,
-		"map":    m.Name,
-		"path":   pinPath,
-		"max":    m.Entries,
-	}).Debug("tetragon, map loaded.")
-
-	return nil
-}
-
 func mergeSensors(sensors []*Sensor) *Sensor {
 	var progs []*program.Program
 	var maps []*program.Map
@@ -399,38 +298,11 @@ func observerLoadInstance(bpfDir string, load *program.Program) error {
 		"prog":         load.Name,
 		"kern_version": version,
 	}).Debugf("observerLoadInstance %s %d", load.Name, version)
-	if load.Type == "tracepoint" {
-		err = loadInstance(bpfDir, load, version, option.Config.Verbosity)
-		if err != nil {
-			l.WithField(
-				"tracepoint", load.Name,
-			).Info("Failed to load, trying to remove and retrying")
-			load.Unload(true)
-			err = loadInstance(bpfDir, load, version, option.Config.Verbosity)
-		}
-		if err != nil {
-			return fmt.Errorf("failed prog %s kern_version %d LoadTracingProgram: %w",
-				load.Name, version, err)
-		}
-	} else if load.Type == "raw_tracepoint" || load.Type == "raw_tp" {
-		err = loadInstance(bpfDir, load, version, option.Config.Verbosity)
-		if err != nil {
-			l.WithField(
-				"raw_tracepoint", load.Name,
-			).Info("Failed to load, trying to remove and retrying")
-			load.Unload(true)
-			err = loadInstance(bpfDir, load, version, option.Config.Verbosity)
-		}
-		if err != nil {
-			return fmt.Errorf("failed prog %s kern_version %d LoadRawTracepointProgram: %w",
-				load.Name, version, err)
-		}
-	} else {
-		err = loadInstance(bpfDir, load, version, option.Config.Verbosity)
-		if err != nil && load.ErrorFatal {
-			return fmt.Errorf("failed prog %s kern_version %d loadInstance: %w",
-				load.Name, version, err)
-		}
+
+	err = loadInstance(bpfDir, load, version, option.Config.Verbosity)
+	if err != nil && load.ErrorFatal {
+		return fmt.Errorf("failed prog %s kern_version %d loadInstance: %w",
+			load.Name, version, err)
 	}
 	return nil
 }

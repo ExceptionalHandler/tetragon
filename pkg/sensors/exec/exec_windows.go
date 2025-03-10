@@ -12,7 +12,6 @@ import (
 	"github.com/cilium/tetragon/pkg/api"
 	"github.com/cilium/tetragon/pkg/api/ops"
 	"github.com/cilium/tetragon/pkg/api/processapi"
-	"github.com/cilium/tetragon/pkg/cgrouprate"
 	exec "github.com/cilium/tetragon/pkg/grpc/exec"
 	"github.com/cilium/tetragon/pkg/logger"
 	"github.com/cilium/tetragon/pkg/observer"
@@ -132,36 +131,6 @@ func handleExit(r *bytes.Reader) ([]observer.Event, error) {
 	return []observer.Event{msgUnix}, nil
 }
 
-func handleClone(r *bytes.Reader) ([]observer.Event, error) {
-	m := processapi.MsgCloneEvent{}
-	err := binary.Read(r, binary.LittleEndian, &m)
-	if err != nil {
-		return nil, err
-	}
-	msgUnix := &exec.MsgCloneEventUnix{MsgCloneEvent: m}
-	return []observer.Event{msgUnix}, nil
-}
-
-func handleCgroupEvent(r *bytes.Reader) ([]observer.Event, error) {
-	m := processapi.MsgCgroupEvent{}
-	err := binary.Read(r, binary.LittleEndian, &m)
-	if err != nil {
-		return nil, err
-	}
-	msgUnix := &exec.MsgCgroupEventUnix{MsgCgroupEvent: m}
-	return []observer.Event{msgUnix}, nil
-}
-
-func handleThrottleEvent(r *bytes.Reader) ([]observer.Event, error) {
-	m := processapi.MsgThrottleEvent{}
-	err := binary.Read(r, binary.LittleEndian, &m)
-	if err != nil {
-		return nil, err
-	}
-	cgrouprate.Check(&m.Kube, m.Common.Ktime)
-	return nil, nil
-}
-
 type execProbe struct{}
 
 func (e *execProbe) LoadProbe(args sensors.LoadProbeArgs) error {
@@ -177,7 +146,4 @@ func AddExec() {
 
 	observer.RegisterEventHandlerAtInit(ops.MSG_OP_EXECVE, handleExecve)
 	observer.RegisterEventHandlerAtInit(ops.MSG_OP_EXIT, handleExit)
-	observer.RegisterEventHandlerAtInit(ops.MSG_OP_CLONE, handleClone)
-	observer.RegisterEventHandlerAtInit(ops.MSG_OP_CGROUP, handleCgroupEvent)
-	observer.RegisterEventHandlerAtInit(ops.MSG_OP_THROTTLE, handleThrottleEvent)
 }

@@ -2,30 +2,23 @@ package ktime
 
 import (
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestKtime(t *testing.T) {
-	t1, err := NanoTimeSince(0)
-	if err != nil {
-		t.Log("FAIL")
-	}
-	t2, err := NanoTimeSince(0)
-	if err != nil {
-		t.Log("FAIL")
-	}
-	t.Log("t2", t2.Nanoseconds())
-	t.Log("t1", t1.Nanoseconds())
+	time1, err := NanoTimeSince(0)
+	assert.Equal(t, err, nil)
+	assert.Greater(t, time1.Milliseconds(), int64(0))
+	time2, err := NanoTimeSince(0)
+	assert.Equal(t, err, nil)
+	assert.GreaterOrEqual(t, time2, time1)
 }
 
 func TestBoottime(t *testing.T) {
-	t1, err := DecodeKtime(0, false)
-	if err != nil {
-		t.Log("FAIL")
-	}
-	t2, err := DecodeKtime(0, false)
-	if err != nil {
-		t.Log("FAIL")
-	}
-	t.Log("t2", t2.Nanosecond())
-	t.Log("t1", t1.Nanosecond())
+	time1, err := NanoTimeSince(0)
+	assert.Equal(t, err, nil)
+	ktime1, err := DecodeKtime(time1.Nanoseconds(), false)
+	assert.Equal(t, err, nil)
+	assert.Greater(t, ktime1.UnixMilli(), int64(0))
 }
