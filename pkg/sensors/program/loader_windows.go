@@ -26,6 +26,7 @@ type OpenFunc func(*ebpf.CollectionSpec) error
 type LoadOpts struct {
 	Attach AttachFunc
 	Open   OpenFunc
+	Maps   []*Map
 }
 
 var (
@@ -137,7 +138,7 @@ func NoAttach() AttachFunc {
 	}
 }
 
-func TracingAttach() AttachFunc {
+func TracingAttach(load *Program, bpfDir string) AttachFunc {
 	return WinAttachStub
 }
 
@@ -155,24 +156,27 @@ func MultiKprobeAttach(load *Program, bpfDir string) AttachFunc {
 	return WinAttachStub
 }
 
-func LoadTracepointProgram(bpfDir string, load *Program, verbose int) error {
+func LoadTracepointProgram(bpfDir string, load *Program, maps []*Map, verbose int) error {
 	opts := &LoadOpts{
 		Attach: TracepointAttach(load, bpfDir),
+		Maps:   maps,
 	}
 	return loadProgram(bpfDir, load, opts, verbose)
 }
 
-func LoadRawTracepointProgram(bpfDir string, load *Program, verbose int) error {
+func LoadRawTracepointProgram(bpfDir string, load *Program, maps []*Map, verbose int) error {
 	opts := &LoadOpts{
 		Attach: RawTracepointAttach(load),
+		Maps:   maps,
 	}
 	return loadProgram(bpfDir, load, opts, verbose)
 }
 
-func LoadKprobeProgram(bpfDir string, load *Program, verbose int) error {
+func LoadKprobeProgram(bpfDir string, load *Program, maps []*Map, verbose int) error {
 	opts := &LoadOpts{
 		Attach: KprobeAttach(load, bpfDir),
 		Open:   KprobeOpen(load),
+		Maps:   maps,
 	}
 	return loadProgram(bpfDir, load, opts, verbose)
 }
@@ -188,57 +192,64 @@ func KprobeAttachMany(load *Program, syms []string, bpfDir string) AttachFunc {
 	return WinAttachStub
 }
 
-func LoadKprobeProgramAttachMany(bpfDir string, load *Program, syms []string, verbose int) error {
+func LoadKprobeProgramAttachMany(bpfDir string, load *Program, syms []string, maps []*Map, verbose int) error {
 	opts := &LoadOpts{
 		Attach: KprobeAttachMany(load, syms, bpfDir),
+		Maps:   maps,
 	}
 	return loadProgram(bpfDir, load, opts, verbose)
 }
 
-func LoadUprobeProgram(bpfDir string, load *Program, verbose int) error {
+func LoadUprobeProgram(bpfDir string, load *Program, maps []*Map, verbose int) error {
 	opts := &LoadOpts{
 		Attach: UprobeAttach(load),
+		Maps:   maps,
 	}
 	return loadProgram(bpfDir, load, opts, verbose)
 }
 
-func LoadMultiKprobeProgram(bpfDir string, load *Program, verbose int) error {
+func LoadMultiKprobeProgram(bpfDir string, load *Program, maps []*Map, verbose int) error {
 	opts := &LoadOpts{
 		Attach: MultiKprobeAttach(load, bpfDir),
 		Open:   KprobeOpen(load),
+		Maps:   maps,
 	}
 	return loadProgram(bpfDir, load, opts, verbose)
 }
 
-func LoadFmodRetProgram(bpfDir string, load *Program, progName string, verbose int) error {
+func LoadFmodRetProgram(bpfDir string, load *Program, maps []*Map, progName string, verbose int) error {
 	return fmt.Errorf("not supported on windows")
 }
 
-func LoadTracingProgram(bpfDir string, load *Program, verbose int) error {
+func LoadTracingProgram(bpfDir string, load *Program, maps []*Map, verbose int) error {
 	opts := &LoadOpts{
-		Attach: TracingAttach(),
+		Attach: TracingAttach(load, bpfDir),
+		Maps:   maps,
 	}
 	return loadProgram(bpfDir, load, opts, verbose)
 }
 
-func LoadLSMProgram(bpfDir string, load *Program, verbose int) error {
+func LoadLSMProgram(bpfDir string, load *Program, maps []*Map, verbose int) error {
 	opts := &LoadOpts{
 		Attach: LSMAttach(),
 		Open:   LSMOpen(load),
+		Maps:   maps,
 	}
 	return loadProgram(bpfDir, load, opts, verbose)
 }
 
-func LoadLSMProgramSimple(bpfDir string, load *Program, verbose int) error {
+func LoadLSMProgramSimple(bpfDir string, load *Program, maps []*Map, verbose int) error {
 	opts := &LoadOpts{
 		Attach: LSMAttach(),
+		Maps:   maps,
 	}
 	return loadProgram(bpfDir, load, opts, verbose)
 }
 
-func LoadMultiUprobeProgram(bpfDir string, load *Program, verbose int) error {
+func LoadMultiUprobeProgram(bpfDir string, load *Program, maps []*Map, verbose int) error {
 	opts := &LoadOpts{
 		Attach: MultiUprobeAttach(load),
+		Maps:   maps,
 	}
 	return loadProgram(bpfDir, load, opts, verbose)
 }
@@ -434,10 +445,11 @@ func loadProgram(
 func LoadProgram(
 	bpfDir string,
 	load *Program,
+	maps []*Map,
 	attach AttachFunc,
 	verbose int,
 ) error {
-	return loadProgram(bpfDir, load, &LoadOpts{Attach: attach}, verbose)
+	return loadProgram(bpfDir, load, &LoadOpts{Attach: attach, Maps: maps}, verbose)
 }
 
 func LoadProgramOpts(

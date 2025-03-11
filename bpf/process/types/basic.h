@@ -9,6 +9,8 @@
 #include "bpf_cred.h"
 #include "skb.h"
 #include "sock.h"
+#include "sockaddr.h"
+#include "socket.h"
 #include "net_device.h"
 #include "../bpf_process_event.h"
 #include "bpfattr.h"
@@ -81,6 +83,11 @@ enum {
 
 	net_dev_ty = 39,
 
+	sockaddr_type = 40,
+	socket_type = 41,
+
+	dentry_type = 42,
+
 	nop_s64_ty = -10,
 	nop_u64_ty = -11,
 	nop_u32_ty = -12,
@@ -117,19 +124,12 @@ enum {
 };
 
 enum {
+	TAIL_CALL_SETUP = 0,
 	TAIL_CALL_PROCESS = 1,
 	TAIL_CALL_FILTER = 2,
 	TAIL_CALL_ARGS = 3,
 	TAIL_CALL_ACTIONS = 4,
 	TAIL_CALL_SEND = 5,
-};
-
-struct generic_maps {
-	struct bpf_map_def *heap;
-	struct bpf_map_def *calls;
-	struct bpf_map_def *config;
-	struct bpf_map_def *filter;
-	struct bpf_map_def *override;
 };
 
 struct selector_action {
@@ -149,6 +149,20 @@ struct selector_arg_filters {
 	__u32 arglen;
 	__u32 argoff[5];
 } __attribute__((packed));
+
+struct config_btf_arg {
+	__u32 offset;
+	__u16 is_pointer;
+	__u16 is_initialized;
+} __attribute__((packed));
+
+struct extract_arg_data {
+	struct config_btf_arg *btf_config;
+	unsigned long *arg;
+};
+
+#define MAX_BTF_ARG_DEPTH    10
+#define EVENT_CONFIG_MAX_ARG 5
 
 struct event_config {
 	__u32 func_id;
@@ -180,6 +194,7 @@ struct event_config {
 	 */
 	__u32 policy_id;
 	__u32 flags;
+	struct config_btf_arg btf_arg[EVENT_CONFIG_MAX_ARG][MAX_BTF_ARG_DEPTH];
 } __attribute__((packed));
 
 #define MAX_ARGS_SIZE	 80
@@ -347,7 +362,7 @@ FUNC_INLINE long copy_path(char *args, const struct path *arg)
 	if (!buffer)
 		return 0;
 
-	asm volatile("%[size] &= 0xff;\n"
+	asm volatile("%[size] &= 0xfff;\n"
 		     : [size] "+r"(size));
 	probe_read(curr, size, buffer);
 	*s = size;
@@ -363,21 +378,8 @@ FUNC_INLINE long copy_path(char *args, const struct path *arg)
 	 * -----------------------------------------
 	 * Next we set up the flags.
 	 */
-	asm volatile goto(
-		"r1 = *(u64 *)%[pid];\n"
-		"r7 = *(u32 *)%[offset];\n"
-		"if r7 s< 0 goto %l[a];\n"
-		"if r7 s> 1188 goto %l[a];\n"
-		"r1 += r7;\n"
-		"r2 = *(u32 *)%[flags];\n"
-		"*(u32 *)(r1 + 0) = r2;\n"
-		"r2 = *(u16 *)%[mode];\n"
-		"*(u16 *)(r1 + 4) = r2;\n"
-		:
-		: [pid] "m"(args), [flags] "m"(flags), [offset] "m"(size), [mode] "m"(i_mode)
-		: "r0", "r1", "r2", "r7", "memory"
-		: a);
-a:
+	args[size] = (u32)flags;
+	args[size + sizeof(u32)] = (u16)i_mode;
 	size += sizeof(u32) + sizeof(u16); // for the flags + i_mode
 
 	return size;
@@ -424,6 +426,26 @@ FUNC_INLINE long copy_sock(char *args, unsigned long arg)
 	struct sk_type *sk_event = (struct sk_type *)args;
 
 	set_event_from_sock(sk_event, sk);
+
+	return sizeof(struct sk_type);
+}
+
+FUNC_INLINE long copy_sockaddr(char *args, unsigned long arg)
+{
+	struct sockaddr_in_type *sockaddr_event = (struct sockaddr_in_type *)args;
+	struct sockaddr *address = (struct sockaddr *)arg;
+
+	set_event_from_sockaddr_in(sockaddr_event, address);
+
+	return sizeof(struct sockaddr_in_type);
+}
+
+FUNC_INLINE long copy_socket(char *args, unsigned long arg)
+{
+	struct socket *sock = (struct socket *)arg;
+	struct sk_type *sk_event = (struct sk_type *)args;
+
+	set_event_from_socket(sk_event, sock);
 
 	return sizeof(struct sk_type);
 }
@@ -1023,21 +1045,32 @@ filter_addr_map(struct selector_arg_filter *filter, __u64 *addr, __u16 family)
 FUNC_LOCAL long
 filter_inet(struct selector_arg_filter *filter, char *args)
 {
-	__u64 addr[2] = { 0, 0 };
-	__u32 port = 0;
-	__u32 value = 0;
-	struct sk_type *sk = 0;
-	struct skb_type *skb = 0;
+	struct sockaddr_in_type *address = 0;
 	struct tuple_type *tuple = 0;
+	struct tuple_type t = { 0 };
+	struct skb_type *skb = 0;
+	__u64 addr[2] = { 0, 0 };
+	struct sk_type *sk = 0;
+	__u32 value = 0;
+	__u32 port = 0;
 
 	switch (filter->type) {
 	case sock_type:
+	case socket_type:
 		sk = (struct sk_type *)args;
 		tuple = &sk->tuple;
 		break;
 	case skb_type:
 		skb = (struct skb_type *)args;
 		tuple = &skb->tuple;
+		break;
+	case sockaddr_type:
+		address = (struct sockaddr_in_type *)args;
+		t.family = address->sin_family;
+		t.sport = address->sin_port;
+		t.saddr[0] = address->sin_addr[0];
+		t.saddr[1] = address->sin_addr[1];
+		tuple = &t;
 		break;
 	default:
 		return 0;
@@ -1071,7 +1104,7 @@ filter_inet(struct selector_arg_filter *filter, char *args)
 		value = tuple->family;
 		break;
 	case op_filter_state:
-		if (filter->type == sock_type)
+		if ((filter->type == sock_type || filter->type == socket_type) && sk)
 			value = sk->state;
 		break;
 	default:
@@ -1099,7 +1132,7 @@ filter_inet(struct selector_arg_filter *filter, char *args)
 	case op_filter_family:
 		return filter_32ty_map(filter, (char *)&value);
 	case op_filter_state:
-		if (filter->type == sock_type)
+		if (filter->type == sock_type || filter->type == socket_type)
 			return filter_32ty_map(filter, (char *)&value);
 	}
 	return 0;
@@ -1472,6 +1505,7 @@ FUNC_INLINE size_t type_to_min_size(int type, int argm)
 	case fd_ty:
 	case file_ty:
 	case path_ty:
+	case dentry_type:
 	case string_type:
 		return MAX_STRING;
 	case int_type:
@@ -1481,7 +1515,10 @@ FUNC_INLINE size_t type_to_min_size(int type, int argm)
 	case skb_type:
 		return sizeof(struct skb_type);
 	case sock_type:
+	case socket_type:
 		return sizeof(struct sk_type);
+	case sockaddr_type:
+		return sizeof(struct sockaddr_in_type);
 	case cred_type:
 		return sizeof(struct msg_cred);
 	case size_type:
@@ -1540,7 +1577,7 @@ struct {
 struct {
 	__uint(type, BPF_MAP_TYPE_ARRAY_OF_MAPS);
 	__uint(max_entries, MAX_SELECTORS); // only one matchBinaries per selector
-	__uint(key_size, sizeof(__u32));
+	__type(key, __u32);
 	__array(
 		values, struct {
 			__uint(type, BPF_MAP_TYPE_HASH);
@@ -1550,11 +1587,9 @@ struct {
 		});
 } tg_mb_paths SEC(".maps");
 
-FUNC_INLINE int match_binaries(__u32 selidx)
+FUNC_INLINE int match_binaries(__u32 selidx, struct execve_map_value *current)
 {
-	struct execve_map_value *current;
-	__u32 ppid;
-	bool walker, match = 0;
+	bool match = 0;
 	void *path_map;
 	__u8 *found_key;
 #ifdef __LARGE_BPF_PROG
@@ -1574,12 +1609,6 @@ FUNC_INLINE int match_binaries(__u32 selidx)
 		if (selector_options->op == op_filter_none)
 			return 1; // matchBinaries selector is empty <=> match
 
-		current = event_find_curr(&ppid, &walker);
-		if (!current) {
-			// this should not happen, it means that the process was missed when
-			// scanning /proc for process that started before and after tetragon
-			return 0;
-		}
 		if (current->bin.path_length < 0) {
 			// something wrong happened when copying the filename to execve_map
 			return 0;
@@ -1719,6 +1748,7 @@ selector_arg_offset(__u8 *f, struct msg_generic_kprobe *e, __u32 selidx,
 			args += 4;
 		case file_ty:
 		case path_ty:
+		case dentry_type:
 #ifdef __LARGE_BPF_PROG
 		case linux_binprm_type:
 #endif
@@ -1753,6 +1783,8 @@ selector_arg_offset(__u8 *f, struct msg_generic_kprobe *e, __u32 selidx,
 			break;
 		case skb_type:
 		case sock_type:
+		case socket_type:
+		case sockaddr_type:
 			pass &= filter_inet(filter, args);
 			break;
 		default:
@@ -1766,37 +1798,6 @@ FUNC_INLINE int filter_args_reject(u64 id)
 {
 	u64 tid = get_current_pid_tgid();
 	retprobe_map_clear(id, tid);
-	return 0;
-}
-
-FUNC_INLINE int
-filter_args(struct msg_generic_kprobe *e, int selidx, void *filter_map,
-	    bool is_entry)
-{
-	__u8 *f;
-
-	/* No filters and no selectors so just accepts */
-	f = map_lookup_elem(filter_map, &e->idx);
-	if (!f) {
-		return 1;
-	}
-
-	/* No selectors, accept by default */
-	if (!e->sel.active[SELECTORS_ACTIVE])
-		return 1;
-
-	/* We ran process filters early as a prefilter to drop unrelated
-	 * events early. Now we need to ensure that active pid sselectors
-	 * have their arg filters run.
-	 */
-	if (selidx > SELECTORS_ACTIVE)
-		return filter_args_reject(e->func_id);
-
-	if (e->sel.active[selidx]) {
-		int pass = selector_arg_offset(f, e, selidx, is_entry);
-		if (pass)
-			return pass;
-	}
 	return 0;
 }
 
@@ -2153,7 +2154,7 @@ update_pid_tid_from_sock(struct msg_generic_kprobe *e, __u64 sockaddr)
 struct {
 	__uint(type, BPF_MAP_TYPE_STACK_TRACE);
 	__uint(max_entries, 1); // Agent is resizing this if the feature is needed during kprobe load
-	__uint(key_size, sizeof(__u32));
+	__type(key, __u32);
 	__uint(value_size, sizeof(__u64) * PERF_MAX_STACK_DEPTH);
 } stack_trace_map SEC(".maps");
 
@@ -2172,275 +2173,14 @@ FUNC_INLINE void do_action_notify_enforcer(struct msg_generic_kprobe *e,
 #define do_action_notify_enforcer(e, error, signal, info_arg_id)
 #endif
 
-FUNC_LOCAL __u32
-do_action(void *ctx, __u32 i, struct selector_action *actions,
-	  struct generic_maps *maps, bool *post)
+FUNC_INLINE void path_from_dentry(struct dentry *dentry, struct path *path_buf)
 {
-	struct bpf_map_def *override_tasks = maps->override;
-	int signal __maybe_unused = FGS_SIGKILL;
-	int action = actions->act[i];
-	struct msg_generic_kprobe *e;
-	__s32 error, *error_p;
-	int fdi, namei;
-	int newfdi, oldfdi;
-	int socki;
-	int argi __maybe_unused;
-	int err = 0;
-	int zero = 0;
-	__u64 id;
-
-	e = map_lookup_elem(maps->heap, &zero);
-	if (!e)
-		return 0;
-
-	switch (action) {
-	case ACTION_NOPOST:
-		*post = false;
-		break;
-	case ACTION_POST: {
-		__u64 ratelimit_interval __maybe_unused = actions->act[++i];
-		__u64 ratelimit_scope __maybe_unused = actions->act[++i];
-#ifdef __LARGE_BPF_PROG
-		if (rate_limit(ratelimit_interval, ratelimit_scope, e))
-			*post = false;
-#endif /* __LARGE_BPF_PROG */
-		__u32 kernel_stack_trace = actions->act[++i];
-
-		if (kernel_stack_trace) {
-			// Stack id 0 is valid so we need a flag.
-			e->common.flags |= MSG_COMMON_FLAG_KERNEL_STACKTRACE;
-			// We could use BPF_F_REUSE_STACKID to override old with new stack if
-			// same stack id. It means that if we have a collision and user space
-			// reads the old one too late, we are reading the wrong stack (the new,
-			// old one was overwritten).
-			//
-			// Here we just signal that there was a collision returning -EEXIST.
-			e->kernel_stack_id = get_stackid(ctx, &stack_trace_map, 0);
-		}
-
-		__u32 user_stack_trace = actions->act[++i];
-
-		if (user_stack_trace) {
-			e->common.flags |= MSG_COMMON_FLAG_USER_STACKTRACE;
-			e->user_stack_id = get_stackid(ctx, &stack_trace_map, BPF_F_USER_STACK);
-		}
-#ifdef __LARGE_MAP_KEYS
-		__u32 ima_hash = actions->act[++i];
-
-		if (ima_hash)
-			e->common.flags |= MSG_COMMON_FLAG_IMA_HASH;
-#endif
-		break;
-	}
-
-	case ACTION_UNFOLLOWFD:
-	case ACTION_FOLLOWFD:
-		fdi = actions->act[++i];
-		namei = actions->act[++i];
-		err = installfd(e, fdi, namei, action == ACTION_FOLLOWFD);
-		break;
-	case ACTION_COPYFD:
-		oldfdi = actions->act[++i];
-		newfdi = actions->act[++i];
-		err = copyfd(e, oldfdi, newfdi);
-		break;
-	case ACTION_SIGNAL:
-		signal = actions->act[++i];
-	case ACTION_SIGKILL:
-		do_action_signal(signal);
-		break;
-	case ACTION_OVERRIDE:
-		error = actions->act[++i];
-		id = get_current_pid_tgid();
-
-		if (!override_tasks)
-			break;
-		/*
-		 * TODO: this should not happen, it means that the override
-		 * program was not executed for some reason, we should do
-		 * warning in here
-		 */
-		error_p = map_lookup_elem(override_tasks, &id);
-		if (error_p)
-			*error_p = error;
-		else
-			map_update_elem(override_tasks, &id, &error, BPF_ANY);
-		break;
-	case ACTION_GETURL:
-	case ACTION_DNSLOOKUP:
-		/* Set the URL or DNS action */
-		e->action_arg_id = actions->act[++i];
-		break;
-	case ACTION_TRACKSOCK:
-	case ACTION_UNTRACKSOCK:
-		socki = actions->act[++i];
-		err = tracksock(e, socki, action == ACTION_TRACKSOCK);
-		break;
-	case ACTION_NOTIFY_ENFORCER:
-		error = actions->act[++i];
-		signal = actions->act[++i];
-		argi = actions->act[++i];
-		do_action_notify_enforcer(e, error, signal, argi);
-		break;
-	case ACTION_CLEANUP_ENFORCER_NOTIFICATION:
-		do_enforcer_cleanup();
-	default:
-		break;
-	}
-	if (!err) {
-		e->action = action;
-		return ++i;
-	}
-	return 0;
-}
-
-FUNC_INLINE bool
-has_action(struct selector_action *actions, __u32 idx)
-{
-	__u32 offset = idx * sizeof(__u32) + sizeof(*actions);
-
-	return offset < actions->actionlen;
-}
-
-/* Currently supporting 2 actions for selector. */
-FUNC_INLINE bool
-do_actions(void *ctx, struct selector_action *actions, struct generic_maps *maps)
-{
-	bool post = true;
-	__u32 l, i = 0;
-
-#ifndef __LARGE_BPF_PROG
-#pragma unroll
-#endif
-	for (l = 0; l < MAX_ACTIONS; l++) {
-		if (!has_action(actions, i))
-			break;
-		i = do_action(ctx, i, actions, maps, &post);
-	}
-
-	return post;
-}
-
-FUNC_INLINE long
-filter_read_arg(void *ctx, struct bpf_map_def *heap,
-		struct bpf_map_def *filter, struct bpf_map_def *tailcalls,
-		struct bpf_map_def *config_map, bool is_entry)
-{
-	struct msg_generic_kprobe *e;
-	int selidx, pass, zero = 0;
-
-	e = map_lookup_elem(heap, &zero);
-	if (!e)
-		return 0;
-	selidx = e->tailcall_index_selector;
-	pass = filter_args(e, selidx & MAX_SELECTORS_MASK, filter, is_entry);
-	if (!pass) {
-		selidx++;
-		if (selidx <= MAX_SELECTORS && e->sel.active[selidx & MAX_SELECTORS_MASK]) {
-			e->tailcall_index_selector = selidx;
-			tail_call(ctx, tailcalls, TAIL_CALL_ARGS);
-		}
-		// reject if we did not attempt to tailcall, or if tailcall failed.
-		return filter_args_reject(e->func_id);
-	}
-
-	// If pass >1 then we need to consult the selector actions
-	// otherwise pass==1 indicates using default action.
-	if (pass > 1) {
-		e->pass = pass;
-		tail_call(ctx, tailcalls, TAIL_CALL_ACTIONS);
-	}
-
-	tail_call(ctx, tailcalls, TAIL_CALL_SEND);
-	return 0;
-}
-
-FUNC_INLINE long
-generic_actions(void *ctx, struct generic_maps *maps)
-{
-	struct selector_arg_filters *arg;
-	struct selector_action *actions;
-	struct msg_generic_kprobe *e;
-	int actoff, pass, zero = 0;
-	bool postit;
-	__u8 *f;
-
-	e = map_lookup_elem(maps->heap, &zero);
-	if (!e)
-		return 0;
-
-	pass = e->pass;
-	if (pass <= 1)
-		return 0;
-
-	f = map_lookup_elem(maps->filter, &e->idx);
-	if (!f)
-		return 0;
-
-	asm volatile("%[pass] &= 0x7ff;\n"
-		     : [pass] "+r"(pass)
-		     :);
-	arg = (struct selector_arg_filters *)&f[pass];
-
-	actoff = pass + arg->arglen;
-	asm volatile("%[actoff] &= 0x7ff;\n"
-		     : [actoff] "+r"(actoff)
-		     :);
-	actions = (struct selector_action *)&f[actoff];
-
-	postit = do_actions(ctx, actions, maps);
-	if (postit)
-		tail_call(ctx, maps->calls, TAIL_CALL_SEND);
-	return postit;
-}
-
-FUNC_INLINE long
-generic_output(void *ctx, struct bpf_map_def *heap, u8 op)
-{
-	struct msg_generic_kprobe *e;
-	int zero = 0;
-	size_t total;
-
-	e = map_lookup_elem(heap, &zero);
-	if (!e)
-		return 0;
-
-/* We don't need this data in return kprobe event */
-#ifndef GENERIC_KRETPROBE
-#ifdef __NS_CHANGES_FILTER
-	/* update the namespaces if we matched a change on that */
-	if (e->sel.match_ns) {
-		__u32 pid = (get_current_pid_tgid() >> 32);
-		struct task_struct *task =
-			(struct task_struct *)get_current_task();
-		struct execve_map_value *enter = execve_map_get_noinit(
-			pid); // we don't want to init that if it does not exist
-		if (enter)
-			get_namespaces(&(enter->ns), task);
-	}
-#endif
-#ifdef __CAP_CHANGES_FILTER
-	/* update the capabilities if we matched a change on that */
-	if (e->sel.match_cap) {
-		__u32 pid = (get_current_pid_tgid() >> 32);
-		struct task_struct *task =
-			(struct task_struct *)get_current_task();
-		struct execve_map_value *enter = execve_map_get_noinit(
-			pid); // we don't want to init that if it does not exist
-		if (enter)
-			get_current_subj_caps(&enter->caps, task);
-	}
-#endif
-#endif // !GENERIC_KRETPROBE
-
-	total = e->common.size + generic_kprobe_common_size();
-	/* Code movement from clang forces us to inline bounds checks here */
-	asm volatile("%[total] &= 0x7fff;\n"
-		     "if %[total] < 9000 goto +1\n;"
-		     "%[total] = 9000;\n"
-		     : [total] "+r"(total));
-	perf_event_output_metric(ctx, op, &tcpmon_map, BPF_F_CURRENT_CPU, e, total);
-	return 0;
+	/*
+	 * The dentry type path extraction does not pass through mount
+	 * points, setting mnt to NULL to stop d_path_local at first one.
+	 */
+	path_buf->mnt = NULL;
+	path_buf->dentry = dentry;
 }
 
 /**
@@ -2465,6 +2205,7 @@ read_call_arg(void *ctx, struct msg_generic_kprobe *e, int index, int type,
 	char *args = e->args;
 	long size = -1;
 	const struct path *path_arg = 0;
+	struct path path_buf;
 
 	if (orig_off >= 16383 - min_size) {
 		return 0;
@@ -2498,6 +2239,10 @@ read_call_arg(void *ctx, struct msg_generic_kprobe *e, int index, int type,
 		probe_read(&path_arg, sizeof(path_arg), &arg);
 		goto do_copy_path;
 	}
+	case dentry_type:
+		path_from_dentry((struct dentry *)arg, &path_buf);
+		path_arg = &path_buf;
+		goto do_copy_path;
 	case fd_ty: {
 		struct fdinstall_key key = { 0 };
 		struct fdinstall_value *val;
@@ -2595,6 +2340,14 @@ read_call_arg(void *ctx, struct msg_generic_kprobe *e, int index, int type,
 		size = copy_sock(args, arg);
 		// Look up socket in our sock->pid_tgid map
 		update_pid_tid_from_sock(e, arg);
+		break;
+	case sockaddr_type:
+		size = copy_sockaddr(args, arg);
+		break;
+	case socket_type:
+		size = copy_socket(args, arg);
+		// Look up socket in our sock->pid_tgid map
+		update_pid_tid_from_sock(e, ((struct sk_type *)args)->sockaddr);
 		break;
 	case cred_type:
 		size = copy_cred(args, arg);

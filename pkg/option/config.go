@@ -27,6 +27,12 @@ type config struct {
 	ForceLargeProgs bool
 	ClusterName     string
 
+	EnableProcessAncestors           bool
+	EnableProcessKprobeAncestors     bool
+	EnableProcessTracepointAncestors bool
+	EnableProcessUprobeAncestors     bool
+	EnableProcessLsmAncestors        bool
+
 	EnableProcessNs   bool
 	EnableProcessCred bool
 	EnableK8s         bool
@@ -77,8 +83,9 @@ type config struct {
 
 	ReleasePinned bool
 
-	EnablePolicyFilter      bool
-	EnablePolicyFilterDebug bool
+	EnablePolicyFilter          bool
+	EnablePolicyFilterCgroupMap bool
+	EnablePolicyFilterDebug     bool
 
 	EnablePidSetFilter bool
 
@@ -109,6 +116,9 @@ type config struct {
 	EventCacheRetryDelay int
 
 	CompatibilitySyscall64SizeType bool
+
+	ExecveMapEntries int
+	ExecveMapSize    string
 }
 
 var (

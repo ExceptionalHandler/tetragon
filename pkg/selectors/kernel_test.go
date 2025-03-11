@@ -14,10 +14,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cilium/tetragon/pkg/config"
 	gt "github.com/cilium/tetragon/pkg/generictypes"
 	"github.com/cilium/tetragon/pkg/idtable"
 	"github.com/cilium/tetragon/pkg/k8s/apis/cilium.io/v1alpha1"
-	"github.com/cilium/tetragon/pkg/kernels"
 )
 
 func TestWriteSelectorUint32(t *testing.T) {
@@ -225,6 +225,8 @@ func TestParseMatchArg(t *testing.T) {
 		v1alpha1.KProbeArg{Index: 6, Type: "skb", SizeArgIndex: 0, ReturnCopy: false},
 		v1alpha1.KProbeArg{Index: 7, Type: "skb", SizeArgIndex: 0, ReturnCopy: false},
 		v1alpha1.KProbeArg{Index: 8, Type: "sock", SizeArgIndex: 0, ReturnCopy: false},
+		v1alpha1.KProbeArg{Index: 9, Type: "sockaddr", SizeArgIndex: 0, ReturnCopy: false},
+		v1alpha1.KProbeArg{Index: 10, Type: "socket", SizeArgIndex: 0, ReturnCopy: false},
 	}
 
 	arg1 := &v1alpha1.ArgSelector{Index: 1, Operator: "Equal", Values: []string{"foobar"}}
@@ -320,7 +322,35 @@ func TestParseMatchArg(t *testing.T) {
 		t.Errorf("parseMatchArg: error %v expected %v bytes %v parsing %v\n", err, expected6, d.e[nextArg:d.off], arg6)
 	}
 
-	if kernels.EnableLargeProgs() { // multiple match args are supported only in kernels >= 5.4
+	nextArg = d.off
+	arg7 := &v1alpha1.ArgSelector{Index: 9, Operator: "SAddr", Values: []string{"127.0.0.1", "::1/128"}}
+	expected7 := []byte{
+		0x09, 0x00, 0x00, 0x00, // Index == 9
+		13, 0x00, 0x00, 0x00, // operator == saddr
+		16, 0x00, 0x00, 0x00, // length == 16
+		0x28, 0x00, 0x00, 0x00, // value type == sockaddr
+		2, 0x00, 0x00, 0x00, // Addr4LPM mapid = 2
+		1, 0x00, 0x00, 0x00, // Addr6LPM mapid = 1
+	}
+	if err := ParseMatchArg(k, arg7, sig); err != nil || bytes.Equal(expected7, d.e[nextArg:d.off]) == false {
+		t.Errorf("parseMatchArg: error %v expected %v bytes %v parsing %v\n", err, expected7, d.e[nextArg:d.off], arg7)
+	}
+
+	nextArg = d.off
+	arg8 := &v1alpha1.ArgSelector{Index: 10, Operator: "SAddr", Values: []string{"127.0.0.1", "::1/128"}}
+	expected8 := []byte{
+		0x0A, 0x00, 0x00, 0x00, // Index == 10
+		13, 0x00, 0x00, 0x00, // operator == saddr
+		16, 0x00, 0x00, 0x00, // length == 16
+		0x29, 0x00, 0x00, 0x00, // value type == socket
+		3, 0x00, 0x00, 0x00, // Addr4LPM mapid = 3
+		2, 0x00, 0x00, 0x00, // Addr6LPM mapid = 2
+	}
+	if err := ParseMatchArg(k, arg8, sig); err != nil || bytes.Equal(expected8, d.e[nextArg:d.off]) == false {
+		t.Errorf("parseMatchArg: error %v expected %v bytes %v parsing %v\n", err, expected8, d.e[nextArg:d.off], arg8)
+	}
+
+	if config.EnableLargeProgs() { // multiple match args are supported only in kernels >= 5.4
 		length := []byte{
 			108, 0x00, 0x00, 0x00,
 			24, 0x00, 0x00, 0x00,
@@ -781,7 +811,7 @@ func TestInitKernelSelectors(t *testing.T) {
 	}
 
 	expected := expected_header
-	if kernels.EnableLargeProgs() {
+	if config.EnableLargeProgs() {
 		expected = append(expected, expected_selsize_large...)
 		expected = append(expected, expected_filters...)
 		expected = append(expected, expected_changes...)
@@ -803,17 +833,17 @@ func TestInitKernelSelectors(t *testing.T) {
 	cap2 := &v1alpha1.CapabilitiesSelector{Type: "Inheritable", Operator: "NotIn", IsNamespaceCapability: false, Values: []string{"CAP_SETPCAP", "CAP_SYS_ADMIN"}}
 	matchCapabilities := []v1alpha1.CapabilitiesSelector{*cap1, *cap2}
 	matchNamespaceChanges := []v1alpha1.NamespaceChangesSelector{}
-	if kernels.EnableLargeProgs() {
+	if config.EnableLargeProgs() {
 		nc := &v1alpha1.NamespaceChangesSelector{Operator: "In", Values: []string{"Uts", "Mnt"}}
 		matchNamespaceChanges = append(matchNamespaceChanges, *nc)
 	}
 	matchCapabilityChanges := []v1alpha1.CapabilitiesSelector{}
-	if kernels.EnableLargeProgs() {
+	if config.EnableLargeProgs() {
 		cc := &v1alpha1.CapabilitiesSelector{Type: "Effective", Operator: "In", IsNamespaceCapability: false, Values: []string{"CAP_SYS_ADMIN", "CAP_NET_RAW"}}
 		matchCapabilityChanges = append(matchCapabilityChanges, *cc)
 	}
 	var matchArgs []v1alpha1.ArgSelector
-	if kernels.EnableLargeProgs() {
+	if config.EnableLargeProgs() {
 		arg1 := &v1alpha1.ArgSelector{Index: 1, Operator: "Equal", Values: []string{"foobar"}}
 		arg2 := &v1alpha1.ArgSelector{Index: 2, Operator: "Equal", Values: []string{"1", "2"}}
 		matchArgs = []v1alpha1.ArgSelector{*arg1, *arg2}

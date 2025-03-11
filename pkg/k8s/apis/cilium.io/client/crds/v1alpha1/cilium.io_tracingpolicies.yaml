@@ -139,6 +139,10 @@ spec:
                               will fetch at most 4096 bytes. In later kernels (>=5.4) tetragon
                               supports fetching up to 327360 bytes if this flag is turned on
                             type: boolean
+                          resolve:
+                            default: ""
+                            description: Resolve the path to a specific attribute
+                            type: string
                           returnCopy:
                             default: false
                             description: |-
@@ -174,6 +178,8 @@ spec:
                             - size_t
                             - skb
                             - sock
+                            - sockaddr
+                            - socket
                             - string
                             - fd
                             - file
@@ -199,6 +205,7 @@ spec:
                             - data_loc
                             - net_device
                             - bpf_cmd
+                            - dentry
                             type: string
                         required:
                         - index
@@ -237,6 +244,10 @@ spec:
                             will fetch at most 4096 bytes. In later kernels (>=5.4) tetragon
                             supports fetching up to 327360 bytes if this flag is turned on
                           type: boolean
+                        resolve:
+                          default: ""
+                          description: Resolve the path to a specific attribute
+                          type: string
                         returnCopy:
                           default: false
                           description: |-
@@ -272,6 +283,8 @@ spec:
                           - size_t
                           - skb
                           - sock
+                          - sockaddr
+                          - socket
                           - string
                           - fd
                           - file
@@ -297,6 +310,7 @@ spec:
                           - data_loc
                           - net_device
                           - bpf_cmd
+                          - dentry
                           type: string
                       required:
                       - index
@@ -850,6 +864,10 @@ spec:
                               will fetch at most 4096 bytes. In later kernels (>=5.4) tetragon
                               supports fetching up to 327360 bytes if this flag is turned on
                             type: boolean
+                          resolve:
+                            default: ""
+                            description: Resolve the path to a specific attribute
+                            type: string
                           returnCopy:
                             default: false
                             description: |-
@@ -885,6 +903,8 @@ spec:
                             - size_t
                             - skb
                             - sock
+                            - sockaddr
+                            - socket
                             - string
                             - fd
                             - file
@@ -910,6 +930,7 @@ spec:
                             - data_loc
                             - net_device
                             - bpf_cmd
+                            - dentry
                             type: string
                         required:
                         - index
@@ -1500,6 +1521,10 @@ spec:
                               will fetch at most 4096 bytes. In later kernels (>=5.4) tetragon
                               supports fetching up to 327360 bytes if this flag is turned on
                             type: boolean
+                          resolve:
+                            default: ""
+                            description: Resolve the path to a specific attribute
+                            type: string
                           returnCopy:
                             default: false
                             description: |-
@@ -1535,6 +1560,8 @@ spec:
                             - size_t
                             - skb
                             - sock
+                            - sockaddr
+                            - socket
                             - string
                             - fd
                             - file
@@ -1560,6 +1587,7 @@ spec:
                             - data_loc
                             - net_device
                             - bpf_cmd
+                            - dentry
                             type: string
                         required:
                         - index
@@ -2085,6 +2113,10 @@ spec:
                               will fetch at most 4096 bytes. In later kernels (>=5.4) tetragon
                               supports fetching up to 327360 bytes if this flag is turned on
                             type: boolean
+                          resolve:
+                            default: ""
+                            description: Resolve the path to a specific attribute
+                            type: string
                           returnCopy:
                             default: false
                             description: |-
@@ -2120,6 +2152,8 @@ spec:
                             - size_t
                             - skb
                             - sock
+                            - sockaddr
+                            - socket
                             - string
                             - fd
                             - file
@@ -2145,6 +2179,7 @@ spec:
                             - data_loc
                             - net_device
                             - bpf_cmd
+                            - dentry
                             type: string
                         required:
                         - index

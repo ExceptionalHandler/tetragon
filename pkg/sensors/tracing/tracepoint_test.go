@@ -21,6 +21,7 @@ import (
 	"github.com/cilium/tetragon/api/v1/tetragon"
 	"github.com/cilium/tetragon/api/v1/tetragon/codegen/eventchecker"
 	ec "github.com/cilium/tetragon/api/v1/tetragon/codegen/eventchecker"
+	"github.com/cilium/tetragon/pkg/config"
 	"github.com/cilium/tetragon/pkg/grpc/tracing"
 	"github.com/cilium/tetragon/pkg/jsonchecker"
 	"github.com/cilium/tetragon/pkg/k8s/apis/cilium.io/v1alpha1"
@@ -86,7 +87,9 @@ func TestGenericTracepointSimple(t *testing.T) {
 
 	sm := tuo.GetTestSensorManager(t)
 	// create and add sensor
-	sensor, err := createGenericTracepointSensor(&spec, "GtpLseekTest", policyfilter.NoFilterID, "policyName", "", nil)
+	policyInfo, err := newPolicyInfoFromSpec("", "policyName", policyfilter.NoFilterID, &spec, nil)
+	require.NoError(t, err)
+	sensor, err := createGenericTracepointSensor(&spec, "GtpLseekTest", policyInfo)
 	if err != nil {
 		t.Fatalf("failed to create generic tracepoint sensor: %s", err)
 	}
@@ -150,7 +153,9 @@ func doTestGenericTracepointPidFilter(t *testing.T, conf v1alpha1.TracepointSpec
 
 	sm := tuo.GetTestSensorManager(t)
 	// create and add sensor
-	sensor, err := createGenericTracepointSensor(&spec, "GtpLseekTest", policyfilter.NoFilterID, "policyName", "", nil)
+	policyInfo, err := newPolicyInfoFromSpec("", "policyName", policyfilter.NoFilterID, &spec, nil)
+	require.NoError(t, err)
+	sensor, err := createGenericTracepointSensor(&spec, "GtpLseekTest", policyInfo)
 	if err != nil {
 		t.Fatalf("failed to create generic tracepoint sensor: %s", err)
 	}
@@ -440,13 +445,10 @@ func TestLoadTracepointSensor(t *testing.T) {
 
 	var sensorMaps = []tus.SensorMap{
 		// all programs
-		tus.SensorMap{Name: "tp_heap", Progs: []uint{0, 1, 2, 3, 4, 5}},
+		tus.SensorMap{Name: "process_call_heap", Progs: []uint{0, 1, 2, 3, 4, 5}},
 
 		// all but generic_tracepoint_output
 		tus.SensorMap{Name: "tp_calls", Progs: []uint{0, 1, 2, 3, 4}},
-
-		// only generic_tracepoint_event*
-		tus.SensorMap{Name: "buffer_heap_map", Progs: []uint{2}},
 
 		// all but generic_tracepoint_event,generic_tracepoint_filter
 		tus.SensorMap{Name: "retprobe_map", Progs: []uint{1, 2}},
@@ -461,12 +463,18 @@ func TestLoadTracepointSensor(t *testing.T) {
 		tus.SensorMap{Name: "tg_conf_map", Progs: []uint{0}},
 	}
 
-	if kernels.EnableLargeProgs() {
+	if config.EnableLargeProgs() {
 		// shared with base sensor
 		sensorMaps = append(sensorMaps, tus.SensorMap{Name: "execve_map", Progs: []uint{3, 4, 5}})
+
+		// generic_tracepoint_event*,generic_tracepoint_filter
+		sensorMaps = append(sensorMaps, tus.SensorMap{Name: "buffer_heap_map", Progs: []uint{2, 3}})
 	} else {
 		// shared with base sensor
 		sensorMaps = append(sensorMaps, tus.SensorMap{Name: "execve_map", Progs: []uint{3}})
+
+		// only generic_tracepoint_event*
+		sensorMaps = append(sensorMaps, tus.SensorMap{Name: "buffer_heap_map", Progs: []uint{2}})
 	}
 
 	readHook := `
@@ -546,7 +554,9 @@ func TestTracepointCloneThreads(t *testing.T) {
 
 	sm := tuo.GetTestSensorManager(t)
 	// create and add sensor
-	sensor, err := createGenericTracepointSensor(&spec, "GtpLseekTest", policyfilter.NoFilterID, "policyName", "", nil)
+	policyInfo, err := newPolicyInfoFromSpec("", "policyName", policyfilter.NoFilterID, &spec, nil)
+	require.NoError(t, err)
+	sensor, err := createGenericTracepointSensor(&spec, "GtpLseekTest", policyInfo)
 	if err != nil {
 		t.Fatalf("failed to create generic tracepoint sensor: %s", err)
 	}

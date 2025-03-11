@@ -10,11 +10,11 @@ import (
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/tetragon/pkg/cgroups"
+	"github.com/cilium/tetragon/pkg/config"
 	"github.com/cilium/tetragon/pkg/constants"
 	"github.com/cilium/tetragon/pkg/logger"
 	"github.com/cilium/tetragon/pkg/option"
 	"github.com/cilium/tetragon/pkg/sensors/base"
-	"github.com/cilium/tetragon/pkg/sensors/exec/config"
 	"github.com/cilium/tetragon/pkg/sensors/program"
 	"github.com/sirupsen/logrus"
 )
@@ -89,22 +89,23 @@ func UpdateTgRuntimeConf(mapDir string, nspid int) error {
 		return err
 	}
 
-	// Detect deployment mode
+	// Detect deployment mode but do not fail
 	deployMode, err := cgroups.DetectDeploymentMode()
 	if err != nil {
 		log.WithField("confmap-update", configMapName).WithError(err).Warnf("Detection of deployment mode failed")
-		log.WithField("confmap-update", configMapName).Warn("Deployment mode is unknown, advanced Cgroups tracking will be disabled")
-		return err
 	}
 
-	mode := cgroups.DeploymentCode(deployMode)
+	// Do not fail if deployment mode is unknown
+	if deployMode == cgroups.DEPLOY_UNKNOWN {
+		log.WithField("confmap-update", configMapName).Warn("Deployment mode is unknown, advanced Cgroups tracking will be disabled")
+	}
 
 	if option.Config.UsernameMetadata == int(option.USERNAME_METADATA_UNIX) &&
-		mode != cgroups.DEPLOY_SD_SERVICE && mode != cgroups.DEPLOY_SD_USER {
+		deployMode != cgroups.DEPLOY_SD_SERVICE && deployMode != cgroups.DEPLOY_SD_USER {
 		option.Config.UsernameMetadata = int(option.USERNAME_METADATA_DISABLED)
 		log.WithFields(logrus.Fields{
 			"confmap-update":  configMapName,
-			"deployment.mode": mode.String(),
+			"deployment.mode": deployMode.String(),
 		}).Warn("Username resolution is not available for given deployment mode")
 	}
 
@@ -124,7 +125,7 @@ func UpdateTgRuntimeConf(mapDir string, nspid int) error {
 	if v.CgrpFsMagic == constants.CGROUP2_SUPER_MAGIC {
 		log.WithFields(logrus.Fields{
 			"confmap-update":     configMapName,
-			"deployment.mode":    mode.String(),
+			"deployment.mode":    deployMode.String(),
 			"log.level":          logrus.Level(v.LogLevel).String(),
 			"cgroup.fs.magic":    cgroups.CgroupFsMagicStr(v.CgrpFsMagic),
 			"cgroup.hierarchyID": v.TgCgrpHierarchy,
@@ -133,7 +134,7 @@ func UpdateTgRuntimeConf(mapDir string, nspid int) error {
 	} else {
 		log.WithFields(logrus.Fields{
 			"confmap-update":                configMapName,
-			"deployment.mode":               mode.String(),
+			"deployment.mode":               deployMode.String(),
 			"log.level":                     logrus.Level(v.LogLevel).String(),
 			"cgroup.fs.magic":               cgroups.CgroupFsMagicStr(v.CgrpFsMagic),
 			"cgroup.controller.name":        cgroups.GetCgrpControllerName(),

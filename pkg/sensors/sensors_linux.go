@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strings"
 	"sync"
 
 	"github.com/cilium/tetragon/pkg/bpf"
@@ -87,10 +86,6 @@ func (s *Sensor) AddPostUnloadHook(hook SensorHook) {
 		err2 := hook()
 		return errors.Join(err1, err2)
 	}
-}
-
-func sanitize(name string) string {
-	return strings.ReplaceAll(name, "/", "_")
 }
 
 type Prog struct {
@@ -223,7 +218,7 @@ var (
 	registeredPolicyHandlers = map[string]policyHandler{}
 	// list of registers loaders, see registerProbeType()
 	registeredProbeLoad = map[string]probeLoader{}
-	standardTypes       = map[string]func(string, *program.Program, int) error{
+	standardTypes       = map[string]func(string, *program.Program, []*program.Map, int) error{
 		"tracepoint":     program.LoadTracepointProgram,
 		"raw_tracepoint": program.LoadRawTracepointProgram,
 		"raw_tp":         program.LoadRawTracepointProgram,
@@ -257,6 +252,7 @@ func RegisterProbeType(probeType string, s probeLoader) {
 type LoadProbeArgs struct {
 	BPFDir           string
 	Load             *program.Program
+	Maps             []*program.Map
 	Version, Verbose int
 }
 

@@ -6,10 +6,6 @@ package tracing
 import "errors"
 
 const (
-	enforcerDataMapName = "enforcer_data"
-)
-
-const (
 	CharBufErrorENOMEM      = -1
 	CharBufErrorPageFault   = -2
 	CharBufErrorTooLarge    = -3
@@ -28,8 +24,6 @@ var errParseStringSize = errors.New("error parsing string size from binary")
 
 // this is from bpf/process/types/basic.h 'MAX_STRING'
 const maxStringSize = 4096
-const maxStringSizeSmall = 510
-const maxStringSizeTiny = 144
 
 func kprobeCharBufErrorToString(e int32) string {
 	switch e {

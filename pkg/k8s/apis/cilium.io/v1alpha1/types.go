@@ -60,10 +60,14 @@ type KProbeArg struct {
 	// +kubebuilder:validation:Minimum=0
 	// Position of the argument.
 	Index uint32 `json:"index"`
-	// +kubebuilder:validation:Enum=auto;int;int8;uint8;int16;uint16;uint32;int32;uint64;int64;char_buf;char_iovec;size_t;skb;sock;string;fd;file;filename;path;nop;bpf_attr;perf_event;bpf_map;user_namespace;capability;kiocb;iov_iter;cred;load_info;module;syscall64;kernel_cap_t;cap_inheritable;cap_permitted;cap_effective;linux_binprm;data_loc;net_device;bpf_cmd
+	// +kubebuilder:validation:Enum=auto;int;int8;uint8;int16;uint16;uint32;int32;uint64;int64;char_buf;char_iovec;size_t;skb;sock;sockaddr;socket;string;fd;file;filename;path;nop;bpf_attr;perf_event;bpf_map;user_namespace;capability;kiocb;iov_iter;cred;load_info;module;syscall64;kernel_cap_t;cap_inheritable;cap_permitted;cap_effective;linux_binprm;data_loc;net_device;bpf_cmd;dentry;
 	// +kubebuilder:default=auto
 	// Argument type.
 	Type string `json:"type"`
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:default=""
+	// Resolve the path to a specific attribute
+	Resolve string `json:"resolve"`
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:Minimum=0
 	// Specifies the position of the corresponding size argument for this argument.

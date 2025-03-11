@@ -3,14 +3,12 @@
 
 include Makefile.defs
 
-GO ?= go
 INSTALL = $(QUIET)install
 BINDIR ?= /usr/local/bin
-CONTAINER_ENGINE ?= docker
 DOCKER_IMAGE_TAG ?= latest
 LOCAL_CLANG ?= 0
 LOCAL_CLANG_FORMAT ?= 0
-FORMAT_FIND_FLAGS ?= -name '*.c' -o -name '*.h' -not -path 'bpf/include/vmlinux.h' -not -path 'bpf/include/api.h' -not -path 'bpf/libbpf/*'
+FORMAT_FIND_FLAGS ?= -name '*.c' -o -name '*.h'
 NOOPT ?= 0
 CLANG_IMAGE = quay.io/cilium/clang:b97f5b3d5c38da62fb009f21a53cd42aefd54a2f@sha256:e1c8ed0acd2e24ed05377f2861d8174af28e09bef3bbc79649c8eba165207df0
 TESTER_PROGS_DIR = "contrib/tester-progs"
@@ -243,7 +241,7 @@ tarball-clean:
 ##@ Test
 
 # renovate: datasource=docker
-GOLANGCILINT_IMAGE=docker.io/golangci/golangci-lint:v1.62.2@sha256:4e53bfe25ef2f1e14a95da42d694211080f40d118730541ce1513a83cf7587ec
+GOLANGCILINT_IMAGE=docker.io/golangci/golangci-lint:v1.64.6@sha256:1c894852e7d45bf91c247862cf25bba4c6d17ed9bf52d09c75e19dcd499b095a
 GOLANGCILINT_WANT_VERSION := $(subst @sha256,,$(patsubst v%,%,$(word 2,$(subst :, ,$(lastword $(subst /, ,$(GOLANGCILINT_IMAGE)))))))
 GOLANGCILINT_VERSION = $(shell golangci-lint version 2>/dev/null)
 .PHONY: check
@@ -279,7 +277,7 @@ bpf-test:
 
 .PHONY: verify
 verify: tetragon-bpf ## Verify BPF programs.
-	sudo contrib/verify/verify.sh bpf/objs
+	sudo DEBUG=${DEBUG} TETRAGONDIR=$(CURDIR)/bpf/objs $(GO) test contrib/verify/verify_test.go -v
 
 .PHONY: alignchecker
 alignchecker: ## Run alignchecker.

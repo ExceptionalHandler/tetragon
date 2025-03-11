@@ -18,6 +18,8 @@ import (
 	processapi "github.com/cilium/tetragon/pkg/api/processapi"
 	api "github.com/cilium/tetragon/pkg/api/tracingapi"
 	"github.com/cilium/tetragon/pkg/bpf"
+	"github.com/cilium/tetragon/pkg/config"
+	conf "github.com/cilium/tetragon/pkg/config"
 	gt "github.com/cilium/tetragon/pkg/generictypes"
 	"github.com/cilium/tetragon/pkg/grpc/tracing"
 	"github.com/cilium/tetragon/pkg/idtable"
@@ -29,6 +31,7 @@ import (
 	"github.com/cilium/tetragon/pkg/policyfilter"
 	"github.com/cilium/tetragon/pkg/selectors"
 	"github.com/cilium/tetragon/pkg/sensors"
+	"github.com/cilium/tetragon/pkg/sensors/base"
 	"github.com/cilium/tetragon/pkg/sensors/program"
 )
 
@@ -101,7 +104,7 @@ func (k *observerLsmSensor) LoadProbe(args sensors.LoadProbeArgs) error {
 		}
 		args.Load.MapLoad = append(args.Load.MapLoad, config)
 
-		if err := program.LoadLSMProgram(args.BPFDir, args.Load, args.Verbose); err == nil {
+		if err := program.LoadLSMProgram(args.BPFDir, args.Load, args.Maps, args.Verbose); err == nil {
 			logger.GetLogger().Infof("Loaded generic LSM program: %s -> %s", args.Load.Name, args.Load.Attach)
 		} else {
 			return err
@@ -211,6 +214,7 @@ type addLsmIn struct {
 func addLsm(f *v1alpha1.LsmHookSpec, in *addLsmIn) (id idtable.EntryID, err error) {
 	var argSigPrinters []argPrinter
 	var argsBTFSet [api.MaxArgsSupported]bool
+	var allBtfArgs [api.EventConfigMaxArgs][api.MaxBtfArgDepth]api.ConfigBtfArg
 
 	errFn := func(err error) (idtable.EntryID, error) {
 		return idtable.UninitializedEntryID, err
@@ -238,14 +242,28 @@ func addLsm(f *v1alpha1.LsmHookSpec, in *addLsmIn) (id idtable.EntryID, err erro
 	// Parse Arguments
 	for j, a := range f.Args {
 		argType := gt.GenericTypeFromString(a.Type)
+
+		if a.Resolve != "" && j < api.EventConfigMaxArgs {
+			if !bpf.HasProgramLargeSize() {
+				return errFn(fmt.Errorf("Error: Resolve flag can't be used for your kernel version. Please update to version 5.4 or higher or disable Resolve flag"))
+			}
+			lastBtfType, btfArg, err := resolveBtfArg("bpf_lsm_"+f.Hook, a)
+			if err != nil {
+				return errFn(fmt.Errorf("Error on hook %q for index %d : %v", f.Hook, a.Index, err))
+			}
+			allBtfArgs[j] = btfArg
+			argType = findTypeFromBtfType(a, lastBtfType)
+		}
+
 		if argType == gt.GenericInvalidType {
 			return errFn(fmt.Errorf("Arg(%d) type '%s' unsupported", j, a.Type))
 		}
+
 		if a.MaxData {
 			if argType != gt.GenericCharBuffer {
 				logger.GetLogger().Warnf("maxData flag is ignored (supported for char_buf type)")
 			}
-			if !kernels.EnableLargeProgs() {
+			if !conf.EnableLargeProgs() {
 				logger.GetLogger().Warnf("maxData flag is ignored (supported from large programs)")
 			}
 		}
@@ -265,6 +283,7 @@ func addLsm(f *v1alpha1.LsmHookSpec, in *addLsmIn) (id idtable.EntryID, err erro
 		argSigPrinters = append(argSigPrinters, argP)
 	}
 
+	config.BtfArg = allBtfArgs
 	config.ArgReturn = int32(0)
 	config.ArgReturnCopy = int32(0)
 
@@ -322,9 +341,7 @@ func addLsm(f *v1alpha1.LsmHookSpec, in *addLsmIn) (id idtable.EntryID, err erro
 func createGenericLsmSensor(
 	spec *v1alpha1.TracingPolicySpec,
 	name string,
-	policyID policyfilter.PolicyID,
-	policyName string,
-	namespace string,
+	polInfo *policyInfo,
 ) (*sensors.Sensor, error) {
 	var progs []*program.Program
 	var maps []*program.Map
@@ -332,7 +349,7 @@ func createGenericLsmSensor(
 	var selMaps *selectors.KernelSelectorMaps
 	var err error
 
-	if !bpf.HasLSMPrograms() || !kernels.EnableLargeProgs() {
+	if !bpf.HasLSMPrograms() || !config.EnableLargeProgs() {
 		return nil, fmt.Errorf("Does you kernel support the bpf LSM? You can enable LSM BPF by modifying" +
 			"the GRUB configuration /etc/default/grub with GRUB_CMDLINE_LINUX=\"lsm=bpf\"")
 	}
@@ -341,8 +358,8 @@ func createGenericLsmSensor(
 
 	in := addLsmIn{
 		sensorPath: name,
-		policyID:   policyID,
-		policyName: policyName,
+		policyID:   polInfo.policyID,
+		policyName: polInfo.name,
 		selMaps:    selMaps,
 	}
 
@@ -359,12 +376,14 @@ func createGenericLsmSensor(
 		if err != nil {
 			return nil, err
 		}
-		progs, maps = createLsmSensorFromEntry(gl, progs, maps)
+		progs, maps = createLsmSensorFromEntry(polInfo, gl, progs, maps)
 	}
 
 	if err != nil {
 		return nil, err
 	}
+
+	maps = append(maps, program.MapUserFrom(base.ExecveMap))
 
 	return &sensors.Sensor{
 		Name:  name,
@@ -380,8 +399,8 @@ func createGenericLsmSensor(
 			}
 			return errs
 		},
-		Policy:    policyName,
-		Namespace: namespace,
+		Policy:    polInfo.name,
+		Namespace: polInfo.namespace,
 	}, nil
 }
 
@@ -415,7 +434,7 @@ func imaProgName(lsmEntry *genericLsm) (string, string) {
 	default:
 		return "", ""
 	}
-	if kernels.EnableV61Progs() {
+	if config.EnableV61Progs() {
 		pName = "bpf_generic_lsm_ima_" + pType + "_v61.o"
 	} else if kernels.MinKernelVersion("5.11") {
 		pName = "bpf_generic_lsm_ima_" + pType + "_v511.o"
@@ -423,12 +442,12 @@ func imaProgName(lsmEntry *genericLsm) (string, string) {
 	return pName, pType
 }
 
-func createLsmSensorFromEntry(lsmEntry *genericLsm,
+func createLsmSensorFromEntry(polInfo *policyInfo, lsmEntry *genericLsm,
 	progs []*program.Program, maps []*program.Map) ([]*program.Program, []*program.Map) {
 
 	loadProgCoreName := "bpf_generic_lsm_core.o"
 	loadProgOutputName := "bpf_generic_lsm_output.o"
-	if kernels.EnableV61Progs() {
+	if config.EnableV61Progs() {
 		loadProgCoreName = "bpf_generic_lsm_core_v61.o"
 		loadProgOutputName = "bpf_generic_lsm_output_v61.o"
 	} else if kernels.MinKernelVersion("5.11") {
@@ -519,6 +538,8 @@ func createLsmSensorFromEntry(lsmEntry *genericLsm,
 	maps = append(maps, overrideTasksMap)
 	overrideTasksMapOutput := program.MapBuilderProgram("override_tasks", loadOutput)
 	maps = append(maps, overrideTasksMapOutput)
+
+	maps = append(maps, polInfo.policyConfMap(load))
 
 	logger.GetLogger().
 		Infof("Added generic lsm sensor: %s -> %s", load.Name, load.Attach)

@@ -193,6 +193,8 @@ tetragon:
     port: 6060
   # -- Enable policy filter. This is required for K8s namespace and pod-label filtering.
   enablePolicyFilter: True
+  # -- Enable policy filter cgroup map.
+  enablePolicyFilterCgroupMap: false
   # -- Enable policy filter debug messages.
   enablePolicyFilterDebug: false
   # -- Enable latency monitoring in message handling
@@ -235,6 +237,16 @@ tetragon:
   enableKeepSensorsOnExit: false
   # -- Configure the interval (suffixed with s for seconds, m for minutes, etc) for the process cache garbage collector.
   processCacheGCInterval: 30s
+  # -- Configure tetragon pod so that it can contact the CRI running on the host
+  cri:
+    enabled: false
+    # -- path of the CRI socket on the host. This will typically be
+    # "/run/containerd/containerd.sock" for containerd or "/var/run/crio/crio.sock"  for crio.
+    socketHostPath: ""
+  # -- Enabling cgidmap instructs the Tetragon agent to use cgroup ids (instead of cgroup names) for
+  # pod association. This feature depends on cri being enabled.
+  cgidmap:
+    enabled: false
 # Tetragon Operator settings
 tetragonOperator:
   # -- Enables the Tetragon Operator.
@@ -274,8 +286,7 @@ tetragonOperator:
   strategy: {}
   # -- Steer the Tetragon Operator Deployment Pod placement via nodeSelector, tolerations and affinity rules.
   nodeSelector: {}
-  tolerations:
-    - operator: Exists
+  tolerations: []
   affinity: {}
   # -- tetragon-operator image.
   image:
@@ -405,7 +416,7 @@ rthooks:
   image:
     override: ~
     repository: quay.io/cilium/tetragon-rthooks
-    tag: v0.4
+    tag: v0.5
   # -- rthooks service account.
   serviceAccount:
     name: ""

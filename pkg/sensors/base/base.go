@@ -8,14 +8,22 @@ import (
 	"runtime"
 	"sync"
 	"testing"
+	"unsafe"
 
+	"github.com/cilium/tetragon/pkg/config"
 	"github.com/cilium/tetragon/pkg/errmetrics"
 	"github.com/cilium/tetragon/pkg/ksyms"
 	"github.com/cilium/tetragon/pkg/logger"
 	"github.com/cilium/tetragon/pkg/mbset"
+	"github.com/cilium/tetragon/pkg/option"
 	"github.com/cilium/tetragon/pkg/sensors"
-	"github.com/cilium/tetragon/pkg/sensors/exec/config"
+	"github.com/cilium/tetragon/pkg/sensors/exec/execvemap"
 	"github.com/cilium/tetragon/pkg/sensors/program"
+	"github.com/cilium/tetragon/pkg/strutils"
+)
+
+const (
+	execveMapMaxEntries = 32768
 )
 
 var (
@@ -64,7 +72,7 @@ var (
 	/* Event Ring map */
 	TCPMonMap = program.MapBuilder("tcpmon_map", Execve)
 	/* Networking and Process Monitoring maps */
-	ExecveMap          = program.MapBuilder("execve_map", Execve)
+	ExecveMap          = program.MapBuilder("execve_map", Execve, Exit, Fork, ExecveBprmCommit)
 	ExecveTailCallsMap = program.MapBuilderProgram("execve_calls", Execve)
 
 	ExecveJoinMap = program.MapBuilder("tg_execve_joined_info_map", ExecveBprmCommit)
@@ -86,7 +94,41 @@ var (
 	ProcessCmdMap     = program.MapBuilder("command_map", CreateProcess)
 )
 
-func setupPrograms() {
+func parseExecveMapSize(str string) (int, error) {
+	// set entries based on size
+	size, err := strutils.ParseSize(str)
+	if err != nil {
+		return 0, err
+	}
+	val := size / int(unsafe.Sizeof(execvemap.ExecveValue{}))
+	return val, nil
+}
+
+func GetExecveEntries(configEntries int, configSize string) int {
+	// Setup execve_map max entries
+	if configEntries != 0 && len(configSize) != 0 {
+		log.Fatal("Both ExecveMapEntries and ExecveMapSize set, confused..")
+	}
+
+	var (
+		entries int
+		err     error
+	)
+
+	if configEntries != 0 {
+		entries = configEntries
+	} else if len(configSize) != 0 {
+		if entries, err = parseExecveMapSize(configSize); err != nil {
+			log.Fatal("Failed to parse ExecveMapSize value")
+		}
+	} else {
+		entries = execveMapMaxEntries
+	}
+
+	return entries
+}
+
+func setupSensor() {
 	// exit program function
 	ks, err := ksyms.KernelSymbols()
 	if err == nil {
@@ -105,6 +147,13 @@ func setupPrograms() {
 		}
 	}
 	logger.GetLogger().Infof("Exit probe on %s", Exit.Attach)
+
+	entries := GetExecveEntries(option.Config.ExecveMapEntries, option.Config.ExecveMapSize)
+	ExecveMap.SetMaxEntries(entries)
+
+	logger.GetLogger().
+		WithField("size", strutils.SizeWithSuffix(entries*int(unsafe.Sizeof(execvemap.ExecveValue{})))).
+		Infof("Set execve_map entries %d", entries)
 }
 
 func GetExecveMap() *program.Map {
@@ -165,7 +214,7 @@ func initBaseSensor() *sensors.Sensor {
 	sensor := sensors.Sensor{
 		Name: basePolicy,
 	}
-	setupPrograms()
+	setupSensor()
 	sensor.Progs = GetDefaultPrograms()
 	sensor.Maps = GetDefaultMaps()
 	return ApplyExtensions(&sensor)

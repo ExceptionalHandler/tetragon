@@ -14,6 +14,7 @@ import (
 
 	"github.com/cilium/tetragon/api/v1/tetragon"
 	"github.com/cilium/tetragon/pkg/api/processapi"
+	"github.com/cilium/tetragon/pkg/config"
 	gt "github.com/cilium/tetragon/pkg/generictypes"
 	"github.com/cilium/tetragon/pkg/idtable"
 	"github.com/cilium/tetragon/pkg/k8s/apis/cilium.io/v1alpha1"
@@ -644,8 +645,8 @@ func writeMatchValues(k *KernelSelectorState, values []string, ty, op uint32) er
 				return fmt.Errorf("MatchArgs value %s invalid: %w", v, err)
 			}
 			WriteSelectorUint64(&k.data, uint64(i))
-		case gt.GenericSockType, gt.GenericSkbType, gt.GenericNetDev:
-			return fmt.Errorf("MatchArgs type sock, skb and net_device do not support operator %s", selectorOpStringTable[op])
+		case gt.GenericSockType, gt.GenericSkbType, gt.GenericSockaddrType, gt.GenericSocketType, gt.GenericNetDev:
+			return fmt.Errorf("MatchArgs type sock, socket, skb, sockaddr and net_device do not support operator %s", selectorOpStringTable[op])
 		case gt.GenericCharIovec:
 			return fmt.Errorf("MatchArgs values %s unsupported", v)
 		}
@@ -757,7 +758,7 @@ func writePostfixStrings(k *KernelSelectorState, values []string, ty uint32) err
 func checkOp(op uint32) error {
 	switch op {
 	case SelectorOpGT, SelectorOpLT:
-		if !kernels.EnableLargeProgs() {
+		if !config.EnableLargeProgs() {
 			return fmt.Errorf("GT/LT operators are only supported in kernels >= 5.3")
 		}
 	}
@@ -812,16 +813,22 @@ func ParseMatchArg(k *KernelSelectorState, arg *v1alpha1.ArgSelector, sig []v1al
 			return fmt.Errorf("writePostfixStrings error: %w", err)
 		}
 	case SelectorOpSport, SelectorOpDport, SelectorOpNotSport, SelectorOpNotDport, SelectorOpProtocol, SelectorOpFamily, SelectorOpState:
-		if ty != gt.GenericSockType && ty != gt.GenericSkbType {
-			return fmt.Errorf("sock/skb operators specified for non-sock/skb type")
+		if ty != gt.GenericSockType && ty != gt.GenericSkbType && ty != gt.GenericSockaddrType && ty != gt.GenericSocketType {
+			return fmt.Errorf("sock/socket/skb/sockaddr operators specified for non-sock/socket/skb/sockaddr type")
 		}
-		err := writeMatchRangesInMap(k, arg.Values, gt.GenericU64Type, op) // force type for ports and protocols as ty is sock/skb
+		if ty == gt.GenericSockaddrType && (op == SelectorOpDport || op == SelectorOpNotDport || op == SelectorOpProtocol || op == SelectorOpState) {
+			return fmt.Errorf("sockaddr only supports [not]saddr, [not]sport[priv], and family")
+		}
+		err := writeMatchRangesInMap(k, arg.Values, gt.GenericU64Type, op) // force type for ports and protocols as ty is sock/socket/skb/sockaddr
 		if err != nil {
 			return fmt.Errorf("writeMatchRangesInMap error: %w", err)
 		}
 	case SelectorOpSaddr, SelectorOpDaddr, SelectorOpNotSaddr, SelectorOpNotDaddr:
-		if ty != gt.GenericSockType && ty != gt.GenericSkbType {
-			return fmt.Errorf("sock/skb operators specified for non-sock/skb type")
+		if ty != gt.GenericSockType && ty != gt.GenericSkbType && ty != gt.GenericSockaddrType && ty != gt.GenericSocketType {
+			return fmt.Errorf("sock/socket/skb/sockaddr operators specified for non-sock/socket/skb/sockaddr type")
+		}
+		if ty == gt.GenericSockaddrType && (op == SelectorOpDaddr || op == SelectorOpNotDaddr) {
+			return fmt.Errorf("sockaddr only supports [not]saddr, [not]sport[priv], and family")
 		}
 		err := writeMatchAddrsInMap(k, arg.Values)
 		if err != nil {
@@ -829,8 +836,11 @@ func ParseMatchArg(k *KernelSelectorState, arg *v1alpha1.ArgSelector, sig []v1al
 		}
 	case SelectorOpSportPriv, SelectorOpDportPriv, SelectorOpNotSportPriv, SelectorOpNotDportPriv:
 		// These selectors do not take any values, but we do check that they are only used for sock/skb.
-		if ty != gt.GenericSockType && ty != gt.GenericSkbType {
-			return fmt.Errorf("sock/skb operators specified for non-sock/skb type")
+		if ty != gt.GenericSockType && ty != gt.GenericSkbType && ty != gt.GenericSockaddrType && ty != gt.GenericSocketType {
+			return fmt.Errorf("sock/socket/skb/sockaddr operators specified for non-sock/socket/skb/sockaddr type")
+		}
+		if ty == gt.GenericSockaddrType && (op == SelectorOpDportPriv || op == SelectorOpNotDportPriv) {
+			return fmt.Errorf("sockaddr only supports [not]saddr, [not]sport[priv], and family")
 		}
 	default:
 		err = writeMatchValues(k, arg.Values, ty, op)
@@ -845,7 +855,7 @@ func ParseMatchArg(k *KernelSelectorState, arg *v1alpha1.ArgSelector, sig []v1al
 
 func ParseMatchArgs(k *KernelSelectorState, args []v1alpha1.ArgSelector, sig []v1alpha1.KProbeArg) error {
 	max_args := 1
-	if kernels.EnableLargeProgs() {
+	if config.EnableLargeProgs() {
 		max_args = 5 // we support up 5 argument filters under matchArgs with kernels >= 5.3, otherwise 1 argument
 	}
 	if len(args) > max_args {
@@ -1068,7 +1078,7 @@ func ParseMatchNamespace(k *KernelSelectorState, action *v1alpha1.NamespaceSelec
 
 func ParseMatchNamespaces(k *KernelSelectorState, actions []v1alpha1.NamespaceSelector) error {
 	max_nactions := 4 // 4 should match the value of the NUM_NS_FILTERS_SMALL in pfilter.h
-	if kernels.EnableLargeProgs() {
+	if config.EnableLargeProgs() {
 		max_nactions = 10 // 10 should match the value of ns_max_types in hubble_msg.h
 	}
 	if len(actions) > max_nactions {
@@ -1114,7 +1124,7 @@ func ParseMatchNamespaceChanges(k *KernelSelectorState, actions []v1alpha1.Names
 	if len(actions) > 1 {
 		return fmt.Errorf("matchNamespaceChanges supports only a single filter (current number of filters is %d)", len(actions))
 	}
-	if (len(actions) == 1) && !kernels.EnableLargeProgs() {
+	if (len(actions) == 1) && !config.EnableLargeProgs() {
 		return fmt.Errorf("matchNamespaceChanges is only supported in kernels >= 5.3")
 	}
 	loff := AdvanceSelectorLength(&k.data)
@@ -1229,7 +1239,7 @@ func ParseMatchBinary(k *KernelSelectorState, b *v1alpha1.BinarySelector, selIdx
 			k.WriteMatchBinariesPath(selIdx, s)
 		}
 	case SelectorOpPrefix, SelectorOpNotPrefix:
-		if !kernels.EnableLargeProgs() {
+		if !config.EnableLargeProgs() {
 			return fmt.Errorf("matchBinary error: \"Prefix\" and \"NotPrefix\" operators need large BPF progs (kernel>5.3)")
 		}
 		sel.MapID, err = writePrefixBinaries(k, b.Values)
@@ -1237,7 +1247,7 @@ func ParseMatchBinary(k *KernelSelectorState, b *v1alpha1.BinarySelector, selIdx
 			return fmt.Errorf("failed to write the prefix operator for the matchBinaries selector: %w", err)
 		}
 	case SelectorOpPostfix, SelectorOpNotPostfix:
-		if !kernels.EnableLargeProgs() {
+		if !config.EnableLargeProgs() {
 			return fmt.Errorf("matchBinary error: \"Postfix\" and \"NotPostfix\" operators need large BPF progs (kernel>5.3)")
 		}
 		sel.MapID, err = writePostfixBinaries(k, b.Values)

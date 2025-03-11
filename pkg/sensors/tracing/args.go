@@ -15,7 +15,6 @@ import (
 	api "github.com/cilium/tetragon/pkg/api/tracingapi"
 	gt "github.com/cilium/tetragon/pkg/generictypes"
 	"github.com/cilium/tetragon/pkg/k8s/apis/cilium.io/v1alpha1"
-	"github.com/cilium/tetragon/pkg/kernels"
 	"github.com/cilium/tetragon/pkg/logger"
 	"github.com/cilium/tetragon/pkg/observer"
 	"github.com/cilium/tetragon/pkg/reader/network"
@@ -141,7 +140,7 @@ func getArg(r *bytes.Reader, a argPrinter) api.MsgGenericKprobeArg {
 		arg.Flags = flags
 		arg.Label = a.label
 		return arg
-	case gt.GenericPathType:
+	case gt.GenericPathType, gt.GenericDentryType:
 		var arg api.MsgGenericKprobeArgPath
 		var flags uint32
 		var mode uint16
@@ -241,7 +240,7 @@ func getArg(r *bytes.Reader, a argPrinter) api.MsgGenericKprobeArg {
 		arg.SecPathOLen = skb.SecPathOLen
 		arg.Label = a.label
 		return arg
-	case gt.GenericSockType:
+	case gt.GenericSockType, gt.GenericSocketType:
 		var sock api.MsgGenericKprobeSock
 		var arg api.MsgGenericKprobeArgSock
 
@@ -263,6 +262,20 @@ func getArg(r *bytes.Reader, a argPrinter) api.MsgGenericKprobeArg {
 		arg.Dport = uint32(sock.Tuple.Dport)
 		arg.Sockaddr = sock.Sockaddr
 		arg.Label = a.label
+		return arg
+	case gt.GenericSockaddrType:
+		var address api.MsgGenericKprobeSockaddr
+		var arg api.MsgGenericKprobeArgSockaddr
+
+		err := binary.Read(r, binary.LittleEndian, &address)
+		if err != nil {
+			logger.GetLogger().WithError(err).Warnf("sockaddr type err")
+		}
+
+		arg.Index = uint64(a.index)
+		arg.SinFamily = address.SinFamily
+		arg.SinAddr = network.GetIP(address.SinAddr, address.SinFamily).String()
+		arg.SinPort = uint32(address.SinPort)
 		return arg
 	case gt.GenericS64Type:
 		var output int64
@@ -571,13 +584,7 @@ func parseString(r io.Reader) (string, error) {
 	}
 
 	// limit the size of the string to avoid huge memory allocation and OOM kill in case of issue
-	maxStrLen := int32(maxStringSize)
-	if !kernels.MinKernelVersion("5.4") {
-		maxStrLen = maxStringSizeTiny
-	} else if !kernels.MinKernelVersion("5.11") {
-		maxStrLen = maxStringSizeSmall
-	}
-	if size > maxStrLen {
+	if size > int32(maxStringSize) {
 		return "", fmt.Errorf("string size too large: %d, max size is %d", size, maxStringSize)
 	}
 	stringBuffer := make([]byte, size)

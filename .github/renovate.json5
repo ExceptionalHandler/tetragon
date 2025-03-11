@@ -15,8 +15,7 @@
     "^make vendor$",
     "^make -C install/kubernetes$",
     "^go mod vendor$",
-    "^install-tool golang \\$\\(grep -oP '\\^go \\\\K\\.\\+' go\\.mod\\)$",
-    "^install-tool golang \\$\\(grep -oP '\\^toolchain go\\\\K\\.\\+' go\\.mod\\)$",
+    "^install-tool golang \\$\\(grep -oP '\\^toolchain go\\\\K\\.\\+\\$' go.mod \\|\\| grep -oP '\\^go \\\\K\\.\\+\\$' go.mod\\)$",
     "^make metrics-docs$",
   ],
   // repository configuration
@@ -26,6 +25,7 @@
     ":gitSignOff",
     "helpers:pinGitHubActionDigests"
   ],
+  "ignorePresets": [":ignoreModulesAndTests"],
   "gitAuthor": "cilium-renovate[bot] <134692979+cilium-renovate[bot]@users.noreply.github.com>",
   "includePaths": [
     ".github/renovate.json5",
@@ -45,6 +45,9 @@
     "install/kubernetes/*/values.yaml",
     "**/*Makefile*",
     "contrib/update-helm-chart.sh",
+    "cmd/tetragon-metrics-docs/metricsmd/metricsmd.go",
+    "tests/e2e/helpers/cluster.go",
+    "tests/e2e/flags/flags.go",
   ],
   "postUpdateOptions": [
     "gomodTidy"
@@ -86,16 +89,25 @@
         "go", // golang version directive upgrade in go.mod
       ],
       "matchPackageNames": [
-        "docker.io/library/**", // official Docker images
+        // Docker deps
+        "docker.io/library/**", // Official Docker images
+        "quay.io/cilium/**", // Cilium quay repo
+        "quay.io/lvh-images/kernel-images", // LVH images
+        // Golang deps
         "github.com/golang/**", // Golang official org
         "golang.org/x/**", // Golang official experimental org
         "google.golang.org/**", // Google official repo for api/genproto/grpc/protobuf
         "github.com/google/**", // Google official github org
         "k8s.io/**", // Kubernetes official repo
         "sigs.k8s.io/**", // Kubernetes official SIG repo
-        "quay.io/lvh-images/kernel-images", // LVH images
+        "github.com/cilium/**", // Cilium org
+        "github.com/prometheus/**", // Prometheus org
+        "github.com/hashicorp/**", // Hashicorp org
+        "go.uber.org/**", // Uber org
+        "go", // The Go package
       ],
       "matchUpdateTypes": [
+        "minor",
         "patch",
         "pin",
         "pinDigest"
@@ -146,9 +158,6 @@
         "pin",
         "pinDigest"
       ],
-      "matchBaseBranches": [
-        "main"
-      ],
     },
     {
       // grouping these together because the number of dependencies is limited
@@ -166,9 +175,6 @@
         "pin",
         "pinDigest"
       ],
-      "matchBaseBranches": [
-        "main"
-      ],
     },
     {
       "groupName": "all k8s pkg go dependencies main",
@@ -184,9 +190,6 @@
         "pin",
         "pinDigest"
       ],
-      "matchBaseBranches": [
-        "main"
-      ],
     },
     {
       "groupName": "all rthook go dependencies main",
@@ -201,9 +204,6 @@
         "digest",
         "pin",
         "pinDigest"
-      ],
-      "matchBaseBranches": [
-        "main"
       ],
     },
     {
@@ -241,7 +241,7 @@
         // We need to trigger a golang install manually here because in some
         // cases it might not be preinstalled, see:
         // https://github.com/renovatebot/renovate/discussions/23485
-        "commands": ["install-tool golang $(grep -oP '^toolchain go\\K.+' go.mod)", "make vendor"],
+        "commands": ["install-tool golang $(grep -oP '^toolchain go\\K.+$' go.mod || grep -oP '^go \\K.+$' go.mod)", "make vendor", "make metrics-docs"],
         "fileFilters": ["**/**"],
         "executionMode": "branch"
       },
@@ -262,7 +262,7 @@
         // We need to trigger a golang install manually here because in some
         // cases it might not be preinstalled, see:
         // https://github.com/renovatebot/renovate/discussions/23485
-        "commands": ["install-tool golang $(grep -oP '^go \\K.+' go.mod)", "make vendor"],
+        "commands": ["install-tool golang $(grep -oP '^toolchain go\\K.+$' go.mod || grep -oP '^go \\K.+$' go.mod)", "make vendor", "make metrics-docs"],
         "fileFilters": ["**/**"],
         "executionMode": "branch"
       },
@@ -346,7 +346,6 @@
       "allowedVersions": "/^1\\.22\\.[0-9]+-?(alpine)?$/",
       "matchBaseBranches": [
         "v1.1",
-        "v1.2",
       ]
     },
     {
@@ -358,6 +357,7 @@
       ],
       "allowedVersions": "/^1\\.23\\.[0-9]+-?(alpine)?$/",
       "matchBaseBranches": [
+        "v1.2",
         "v1.3",
       ]
     },
@@ -442,7 +442,7 @@
       ],
       "draftPR": true,
       "prBodyNotes": [
-        ":warning: Manual steps need to be performed (explaining why this PR is only a draft). First replace directives must be synchronized with cilium/cilium, see the `go.mod` and `pkg/k8s/go.mod` for more info. Then dependencies ignore in `.github/renovate.json5` for the replace directive must be updated accordingly. Finally, make sure that k8s dependencies were also bumped along Cilium."
+        ":warning: Manual steps need to be performed (explaining why this PR is only a draft). First replace directives must be synchronized with cilium/cilium, see the `go.mod` and `pkg/k8s/go.mod` for more info. Then dependencies ignore in `.github/renovate.json5` for the replace directive must be updated accordingly. Finally, make sure that k8s and cel-go dependencies were also bumped along Cilium."
       ]
     },
     {
@@ -450,7 +450,8 @@
       "matchPackageNames": [
         // k8s dependencies will be updated manually along cilium updates
         "k8s\\.io/*",
-        "sigs\\.k8s\\.io/*"
+        "sigs\\.k8s\\.io/*",
+        "github.com/google/cel-go", // cel-go is a dependency of k8s apiserver
       ],
       "matchUpdateTypes": [
         "major",
@@ -469,6 +470,21 @@
       "matchUpdateTypes": [
         "major",
       ],
+    },
+    {
+      // This major update is breaking tetragon rthooks
+      "enabled": false,
+      "matchFileNames": ["contrib/tetragon-rthooks/go.*"],
+      "matchPackageNames": ["github.com/containerd/containerd"],
+      "matchUpdateTypes": ["major"],
+    },
+    {
+      // Disable digest updates on Docker images except for the base image of
+      // our build that needs to have all deps updated
+      "enabled": false,
+      "matchDatasources": ["docker"],
+      "matchUpdateTypes": ["digest"],
+      "matchPackageNames": ["!docker.io/library/alpine"],
     },
   ],
   // Those regexes manage version strings in variousfiles, similar to the
@@ -527,6 +543,33 @@
       "matchStrings": [
         "# renovate: datasource=(?<datasource>.*?) depName=(?<depName>.*?)\\s+&& git clone --depth 1 --branch (?<currentValue>v\\d+\\.\\d+\\.\\d+)"
       ]
-    }
+    },
+    {
+      "customType": "regex",
+      "fileMatch": [
+        "^cmd/tetragon-metrics-docs/metricsmd/metricsmd.go$"
+      ],
+      "matchStrings": [
+        "\\/\\/ renovate: datasource=(?<datasource>.*?)\\s+Values: \\[]string{\"(?<depName>go)(?<currentValue>.*?)\""
+      ]
+    },
+    {
+      "customType": "regex",
+      "fileMatch": [
+        "^tests/e2e/helpers/cluster.go$"
+      ],
+      "matchStrings": [
+        "\\/\\/ renovate: datasource=(?<datasource>.*?)\\s+.*\"(?<depName>.*?):(?<currentValue>.*?)\""
+      ]
+    },
+    {
+      "customType": "regex",
+      "fileMatch": [
+        "^tests/e2e/flags/flags.go$"
+      ],
+      "matchStrings": [
+        "\\/\\/ renovate: datasource=(?<datasource>.*?) depName=(?<depName>.*?)\\s+CiliumVersion:\\s*\"(?<currentValue>.*?)\""
+      ]
+    },
   ]
 }

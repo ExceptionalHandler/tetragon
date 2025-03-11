@@ -65,14 +65,14 @@ type ProcessInternal struct {
 
 var (
 	procCache *Cache
-	k8s       watcher.K8sResourceWatcher
+	k8s       watcher.PodAccessor
 )
 
 var (
 	ErrProcessInfoMissing = errors.New("failed process info missing")
 )
 
-func InitCache(w watcher.K8sResourceWatcher, size int, GCInterval time.Duration) error {
+func InitCache(w watcher.PodAccessor, size int, GCInterval time.Duration) error {
 	var err error
 
 	if procCache != nil {
@@ -230,6 +230,13 @@ func (pi *ProcessInternal) RefInc(reason string) {
 
 func (pi *ProcessInternal) RefGet() uint32 {
 	return atomic.LoadUint32(&pi.refcnt)
+}
+
+func (pi *ProcessInternal) NeededAncestors() bool {
+	if pi != nil && pi.process.Pid.Value > 2 {
+		return true
+	}
+	return false
 }
 
 // UpdateEventProcessTID Updates the Process.Tid of the event on the fly.
@@ -481,6 +488,29 @@ func GetParentProcessInternal(pid uint32, ktime uint64) (*ProcessInternal, *Proc
 	return process, parent
 }
 
+// GetAncestorProcessesInternal returns a slice, representing a continuous sequence of ancestors
+// of the process up to init process (PID 1) or kthreadd (PID 2), including the immediate parent.
+func GetAncestorProcessesInternal(execId string) ([]*ProcessInternal, error) {
+	var ancestors []*ProcessInternal
+	var process *ProcessInternal
+	var err error
+
+	if process, err = procCache.get(execId); err != nil {
+		return nil, err
+	}
+
+	// No need to include <kernel> process (PID 0)
+	for process.process.Pid.Value > 2 {
+		if process, err = procCache.get(process.process.ParentExecId); err != nil {
+			logger.GetLogger().WithError(err).WithField("id in event", execId).Debug("ancestor process not found in cache")
+			break
+		}
+		ancestors = append(ancestors, process)
+	}
+
+	return ancestors, err
+}
+
 // AddExecEvent constructs a new ProcessInternal structure from an Execve event, adds it to the cache, and also returns it
 func AddExecEvent(event *tetragonAPI.MsgExecveEventUnix) *ProcessInternal {
 	var proc *ProcessInternal
@@ -523,12 +553,21 @@ func Get(execId string) (*ProcessInternal, error) {
 	return procCache.get(execId)
 }
 
-// GetK8s returns K8sResourceWatcher. You must call InitCache before calling this function to ensure
+// GetK8s returns PodAccessor. You must call InitCache before calling this function to ensure
 // that k8s has been initialized.
-func GetK8s() watcher.K8sResourceWatcher {
+func GetK8s() watcher.PodAccessor {
 	return k8s
 }
 
 func DumpProcessCache(opts *tetragon.DumpProcessCacheReqArgs) []*tetragon.ProcessInternal {
 	return procCache.dump(opts)
+}
+
+// This function returns the process cache entries (and not the copies
+// of them as opposed to dump function). Thus any changes to the return
+// value results in affecting the process cache entries.
+// This is mainly for tests where we want to check the values of the
+// process cache.
+func GetCacheEntries() []*tetragon.ProcessInternal {
+	return procCache.getEntries()
 }

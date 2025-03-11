@@ -257,6 +257,10 @@ const (
 	// Alias to NodePortMode
 	LoadBalancerMode = "bpf-lb-mode"
 
+	// LoadBalancerModeAnnotation tells whether controller should check service
+	// level annotation for configuring bpf loadbalancing method (snat vs dsr).
+	LoadBalancerModeAnnotation = "bpf-lb-mode-annotation"
+
 	// Alias to DSR dispatch method
 	LoadBalancerDSRDispatch = "bpf-lb-dsr-dispatch"
 
@@ -282,12 +286,6 @@ const (
 
 	// LoadBalancerProtocolDifferentiation enables support for service protocol differentiation (TCP, UDP, SCTP)
 	LoadBalancerProtocolDifferentiation = "bpf-lb-proto-diff"
-
-	// MaglevTableSize determines the size of the backend table per service
-	MaglevTableSize = "bpf-lb-maglev-table-size"
-
-	// MaglevHashSeed contains the cluster-wide seed for the hash
-	MaglevHashSeed = "bpf-lb-maglev-hash-seed"
 
 	// NodePortBindProtection rejects bind requests to NodePort service ports
 	NodePortBindProtection = "node-port-bind-protection"
@@ -771,6 +769,11 @@ const (
 	// This feature will encrypt overlay traffic before it leaves the cluster.
 	EnableIPSecEncryptedOverlay = "enable-ipsec-encrypted-overlay"
 
+	// BootIDFilename is a hidden flag that allows users to specify a
+	// filename other than /proc/sys/kernel/random/boot_id. This can be
+	// useful for testing purposes in local containerized cluster.
+	BootIDFilename = "boot-id-file"
+
 	// EnableWireguard is the name of the option to enable WireGuard
 	EnableWireguard = "enable-wireguard"
 
@@ -844,16 +847,15 @@ const (
 	// HealthCheckICMPFailureThreshold is the name of the HealthCheckICMPFailureThreshold option
 	HealthCheckICMPFailureThreshold = "health-check-icmp-failure-threshold"
 
-	// PolicyQueueSize is the size of the queues utilized by the policy
-	// repository.
-	PolicyQueueSize = "policy-queue-size"
-
 	// EndpointQueueSize is the size of the EventQueue per-endpoint.
 	EndpointQueueSize = "endpoint-queue-size"
 
 	// EndpointGCInterval interval to attempt garbage collection of
 	// endpoints that are no longer alive and healthy.
 	EndpointGCInterval = "endpoint-gc-interval"
+
+	// EndpointRegenInterval is the interval of the periodic endpoint regeneration loop.
+	EndpointRegenInterval = "endpoint-regen-interval"
 
 	// LoopbackIPv4 is the address to use for service loopback SNAT
 	LoopbackIPv4 = "ipv4-service-loopback-address"
@@ -1027,19 +1029,13 @@ const (
 	// Otherwise, it will use the old scheme.
 	EgressMultiHomeIPRuleCompat = "egress-multi-home-ip-rule-compat"
 
+	// Install ingress/egress routes through uplink on host for Pods when working with
+	// delegated IPAM plugin.
+	InstallUplinkRoutesForDelegatedIPAM = "install-uplink-routes-for-delegated-ipam"
+
 	// EnableCustomCallsName is the name of the option to enable tail calls
 	// for user-defined custom eBPF programs.
 	EnableCustomCallsName = "enable-custom-calls"
-
-	// BGPAnnounceLBIP announces service IPs of type LoadBalancer via BGP
-	BGPAnnounceLBIP = "bgp-announce-lb-ip"
-
-	// BGPAnnouncePodCIDR announces the node's pod CIDR via BGP
-	BGPAnnouncePodCIDR = "bgp-announce-pod-cidr"
-
-	// BGPConfigPath is the file path to the BGP configuration. It is
-	// compatible with MetalLB's configuration.
-	BGPConfigPath = "bgp-config-path"
 
 	// BGPSecretsNamespace is the Kubernetes namespace to get BGP control plane secrets from.
 	BGPSecretsNamespace = "bgp-secrets-namespace"
@@ -1147,6 +1143,10 @@ const (
 
 	// EnableNonDefaultDenyPolicies allows policies to define whether they are operating in default-deny mode
 	EnableNonDefaultDenyPolicies = "enable-non-default-deny-policies"
+
+	// EnableEndpointLockdownOnPolicyOverflow enables endpoint lockdown when an endpoint's
+	// policy map overflows.
+	EnableEndpointLockdownOnPolicyOverflow = "enable-endpoint-lockdown-on-policy-overflow"
 )
 
 // Default string arguments
@@ -1217,10 +1217,6 @@ const (
 
 	// NodePortModeHybrid is a dual mode of the above, that is, DSR for TCP and SNAT for UDP
 	NodePortModeHybrid = "hybrid"
-
-	// NodePortModeAnnotation is a dual mode of dsr and snat, specified through the
-	// service.cilium.io/dispatch annotation on the K8s service object
-	NodePortModeAnnotation = "annotation"
 
 	// NodePortAlgRandom is for randomly selecting a backend
 	NodePortAlgRandom = "random"
@@ -1568,6 +1564,9 @@ type DaemonConfig struct {
 	// EnableIPSecEncryptedOverlay enables IPSec encryption for overlay traffic.
 	EnableIPSecEncryptedOverlay bool
 
+	// BootIDFile is the file containing the boot ID of the node
+	BootIDFile string
+
 	// EnableWireguard enables Wireguard encryption
 	EnableWireguard bool
 
@@ -1816,10 +1815,6 @@ type DaemonConfig struct {
 	// The default is 30 seconds for k8s clusters, and 10 minutes for kvstore clusters
 	IdentityRestoreGracePeriod time.Duration
 
-	// PolicyQueueSize is the size of the queues for the policy repository.
-	// A larger queue means that more events related to policy can be buffered.
-	PolicyQueueSize int
-
 	// EndpointQueueSize is the size of the EventQueue per-endpoint. A larger
 	// queue means that more events can be buffered per-endpoint. This is useful
 	// in the case where a cluster might be under high load for endpoint-related
@@ -1871,6 +1866,10 @@ type DaemonConfig struct {
 	// ("snat", "dsr" or "hybrid")
 	NodePortMode string
 
+	// LoadBalancerModeAnnotation tells whether controller should check service
+	// level annotation for configuring bpf load balancing algorithm.
+	LoadBalancerModeAnnotation bool
+
 	// NodePortAlg indicates which backend selection algorithm is used
 	// ("random" or "maglev")
 	NodePortAlg string
@@ -1901,12 +1900,6 @@ type DaemonConfig struct {
 	// EnablePMTUDiscovery indicates whether to send ICMP fragmentation-needed
 	// replies to the client (when needed).
 	EnablePMTUDiscovery bool
-
-	// Maglev backend table size (M) per service. Must be prime number.
-	MaglevTableSize int
-
-	// MaglevHashSeed contains the cluster-wide seed for the hash(es).
-	MaglevHashSeed string
 
 	// NodePortAcceleration indicates whether NodePort should be accelerated
 	// via XDP ("none", "generic", "native", or "best-effort")
@@ -2101,6 +2094,10 @@ type DaemonConfig struct {
 	// Otherwise, it will use the old scheme.
 	EgressMultiHomeIPRuleCompat bool
 
+	// Install ingress/egress routes through uplink on host for Pods when working with
+	// delegated IPAM plugin.
+	InstallUplinkRoutesForDelegatedIPAM bool
+
 	// InstallNoConntrackIptRules instructs Cilium to install Iptables rules to skip netfilter connection tracking on all pod traffic.
 	InstallNoConntrackIptRules bool
 
@@ -2112,16 +2109,6 @@ type DaemonConfig struct {
 	// eBPF programs, typically used to collect custom per-endpoint
 	// metrics.
 	EnableCustomCalls bool
-
-	// BGPAnnounceLBIP announces service IPs of type LoadBalancer via BGP.
-	BGPAnnounceLBIP bool
-
-	// BGPAnnouncePodCIDR announces the node's pod CIDR via BGP.
-	BGPAnnouncePodCIDR bool
-
-	// BGPConfigPath is the file path to the BGP configuration. It is
-	// compatible with MetalLB's configuration.
-	BGPConfigPath string
 
 	// BGPSecretsNamespace is the Kubernetes namespace to get BGP control plane secrets from.
 	BGPSecretsNamespace string
@@ -2259,6 +2246,10 @@ type DaemonConfig struct {
 
 	// EnableSourceIPVerification enables the source ip validation of connection from endpoints to endpoints
 	EnableSourceIPVerification bool
+
+	// EnableEndpointLockdownOnPolicyOverflow enables endpoint lockdown when an endpoint's
+	// policy map overflows.
+	EnableEndpointLockdownOnPolicyOverflow bool
 }
 
 var (
@@ -2387,14 +2378,33 @@ func (c *DaemonConfig) AreDevicesRequired() bool {
 		c.EnableIPSecEncryptedOverlay
 }
 
-// When WG & encrypt-node are on, a NodePort BPF to-be forwarded request
-// to a remote node running a selected service endpoint must be encrypted.
-// To make the NodePort's rev-{S,D}NAT translations to happen for a reply
-// from the remote node, we need to attach bpf_host to the Cilium's WG
-// netdev (otherwise, the WG netdev after decrypting the reply will pass
-// it to the stack which drops the packet).
+// NeedBPFHostOnWireGuardDevice returns true if the agent needs to attach
+// a BPF program on the Ingress of Cilium's WireGuard device
 func (c *DaemonConfig) NeedBPFHostOnWireGuardDevice() bool {
-	return c.EnableNodePort && c.EnableWireguard && c.EncryptNode
+	if !c.EnableWireguard {
+		return false
+	}
+
+	// In native routing mode we want to deliver packets to local endpoints
+	// straight from BPF, without passing through the stack.
+	// This matches overlay mode (where bpf_overlay would handle the delivery)
+	// and native routing mode without encryption (where bpf_host at the native
+	// device would handle the delivery).
+	if !c.TunnelingEnabled() {
+		return true
+	}
+
+	// When WG & encrypt-node are on, a NodePort BPF to-be forwarded request
+	// to a remote node running a selected service endpoint must be encrypted.
+	// To make the NodePort's rev-{S,D}NAT translations to happen for a reply
+	// from the remote node, we need to attach bpf_host to the Cilium's WG
+	// netdev (otherwise, the WG netdev after decrypting the reply will pass
+	// it to the stack which drops the packet).
+	if c.EnableNodePort && c.EncryptNode {
+		return true
+	}
+
+	return false
 }
 
 // MasqueradingEnabled returns true if either IPv4 or IPv6 masquerading is enabled.
@@ -2549,7 +2559,7 @@ func (c *DaemonConfig) DirectRoutingDeviceRequired() bool {
 func (c *DaemonConfig) LoadBalancerUsesDSR() bool {
 	return c.NodePortMode == NodePortModeDSR ||
 		c.NodePortMode == NodePortModeHybrid ||
-		c.NodePortMode == NodePortModeAnnotation
+		c.LoadBalancerModeAnnotation
 }
 
 // KVstoreEnabledWithoutPodNetworkSupport returns whether Cilium is configured to connect
@@ -2841,9 +2851,7 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
 	c.EnableXDPPrefilter = vp.GetBool(EnableXDPPrefilter)
 	c.EnableTCX = vp.GetBool(EnableTCX)
 	c.DisableCiliumEndpointCRD = vp.GetBool(DisableCiliumEndpointCRDName)
-	if masqInfs := vp.GetString(MasqueradeInterfaces); masqInfs != "" {
-		c.MasqueradeInterfaces = strings.Split(masqInfs, ",")
-	}
+	c.MasqueradeInterfaces = vp.GetStringSlice(MasqueradeInterfaces)
 	c.BPFSocketLBHostnsOnly = vp.GetBool(BPFSocketLBHostnsOnly)
 	c.EnableSocketLB = vp.GetBool(EnableSocketLB)
 	c.EnableSocketLBTracing = vp.GetBool(EnableSocketLBTracing)
@@ -2868,8 +2876,6 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
 	c.EnableSVCSourceRangeCheck = vp.GetBool(EnableSVCSourceRangeCheck)
 	c.EnableHostPort = vp.GetBool(EnableHostPort)
 	c.EnableHostLegacyRouting = vp.GetBool(EnableHostLegacyRouting)
-	c.MaglevTableSize = vp.GetInt(MaglevTableSize)
-	c.MaglevHashSeed = vp.GetString(MaglevHashSeed)
 	c.NodePortBindProtection = vp.GetBool(NodePortBindProtection)
 	c.EnableAutoProtectNodePortRange = vp.GetBool(EnableAutoProtectNodePortRange)
 	c.KubeProxyReplacement = vp.GetString(KubeProxyReplacement)
@@ -2955,9 +2961,6 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
 	c.InstallNoConntrackIptRules = vp.GetBool(InstallNoConntrackIptRules)
 	c.ContainerIPLocalReservedPorts = vp.GetString(ContainerIPLocalReservedPorts)
 	c.EnableCustomCalls = vp.GetBool(EnableCustomCallsName)
-	c.BGPAnnounceLBIP = vp.GetBool(BGPAnnounceLBIP)
-	c.BGPAnnouncePodCIDR = vp.GetBool(BGPAnnouncePodCIDR)
-	c.BGPConfigPath = vp.GetString(BGPConfigPath)
 	c.BGPSecretsNamespace = vp.GetString(BGPSecretsNamespace)
 	c.ExternalClusterIP = vp.GetBool(ExternalClusterIPName)
 	c.EnableNat46X64Gateway = vp.GetBool(EnableNat46X64Gateway)
@@ -2975,6 +2978,7 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
 	c.BPFConntrackAccounting = vp.GetBool(BPFConntrackAccounting)
 	c.EnableIPSecEncryptedOverlay = vp.GetBool(EnableIPSecEncryptedOverlay)
 	c.LBSourceRangeAllTypes = vp.GetBool(LBSourceRangeAllTypes)
+	c.BootIDFile = vp.GetString(BootIDFilename)
 
 	c.ServiceNoBackendResponse = vp.GetString(ServiceNoBackendResponse)
 	switch c.ServiceNoBackendResponse {
@@ -2988,6 +2992,7 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
 	c.populateLoadBalancerSettings(vp)
 	c.EnableRuntimeDeviceDetection = vp.GetBool(EnableRuntimeDeviceDetection)
 	c.EgressMultiHomeIPRuleCompat = vp.GetBool(EgressMultiHomeIPRuleCompat)
+	c.InstallUplinkRoutesForDelegatedIPAM = vp.GetBool(InstallUplinkRoutesForDelegatedIPAM)
 
 	vlanBPFBypassIDs := vp.GetStringSlice(VLANBPFBypass)
 	c.VLANBPFBypass = make([]int, 0, len(vlanBPFBypassIDs))
@@ -3225,6 +3230,15 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
 			EnableCiliumEndpointSlice, c.EnableCiliumEndpointSlice, DisableCiliumEndpointCRDName)
 	}
 
+	// To support K8s NetworkPolicy
+	c.EnableK8sNetworkPolicy = vp.GetBool(EnableK8sNetworkPolicy)
+	c.PolicyCIDRMatchMode = vp.GetStringSlice(PolicyCIDRMatchMode)
+	c.EnableNodeSelectorLabels = vp.GetBool(EnableNodeSelectorLabels)
+	c.NodeLabels = vp.GetStringSlice(NodeLabels)
+
+	c.EnableCiliumNetworkPolicy = vp.GetBool(EnableCiliumNetworkPolicy)
+	c.EnableCiliumClusterwideNetworkPolicy = vp.GetBool(EnableCiliumClusterwideNetworkPolicy)
+
 	c.IdentityAllocationMode = vp.GetString(IdentityAllocationMode)
 	switch c.IdentityAllocationMode {
 	// This is here for tests. Some call Populate without the normal init
@@ -3274,7 +3288,6 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
 	c.K8sNamespace = vp.GetString(K8sNamespaceName)
 	c.AgentNotReadyNodeTaintKey = vp.GetString(AgentNotReadyNodeTaintKeyName)
 	c.MaxControllerInterval = vp.GetInt(MaxCtrlIntervalName)
-	c.PolicyQueueSize = sanitizeIntParam(vp, PolicyQueueSize, defaults.PolicyQueueSize)
 	c.EndpointQueueSize = sanitizeIntParam(vp, EndpointQueueSize, defaults.EndpointQueueSize)
 	c.EnableICMPRules = vp.GetBool(EnableICMPRules)
 	c.UseCiliumInternalIPForIPsec = vp.GetBool(UseCiliumInternalIPForIPsec)
@@ -3290,14 +3303,8 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
 	// Enable BGP control plane status reporting
 	c.EnableBGPControlPlaneStatusReport = vp.GetBool(EnableBGPControlPlaneStatusReport)
 
-	// To support K8s NetworkPolicy
-	c.EnableK8sNetworkPolicy = vp.GetBool(EnableK8sNetworkPolicy)
-	c.PolicyCIDRMatchMode = vp.GetStringSlice(PolicyCIDRMatchMode)
-	c.EnableNodeSelectorLabels = vp.GetBool(EnableNodeSelectorLabels)
-	c.NodeLabels = vp.GetStringSlice(NodeLabels)
-
-	c.EnableCiliumNetworkPolicy = vp.GetBool(EnableCiliumNetworkPolicy)
-	c.EnableCiliumClusterwideNetworkPolicy = vp.GetBool(EnableCiliumClusterwideNetworkPolicy)
+	// Support failure-mode for policy map overflow
+	c.EnableEndpointLockdownOnPolicyOverflow = vp.GetBool(EnableEndpointLockdownOnPolicyOverflow)
 
 	// Parse node label patterns
 	nodeLabelPatterns := vp.GetStringSlice(ExcludeNodeLabelPatterns)
@@ -3324,6 +3331,7 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
 func (c *DaemonConfig) populateLoadBalancerSettings(vp *viper.Viper) {
 	c.NodePortAcceleration = vp.GetString(LoadBalancerAcceleration)
 	c.NodePortMode = vp.GetString(LoadBalancerMode)
+	c.LoadBalancerModeAnnotation = vp.GetBool(LoadBalancerModeAnnotation)
 	c.NodePortAlg = vp.GetString(LoadBalancerAlgorithm)
 	c.LoadBalancerAlgorithmAnnotation = vp.GetBool(LoadBalancerAlgorithmAnnotation)
 	// If old settings were explicitly set by the user, then have them

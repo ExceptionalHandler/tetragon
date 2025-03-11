@@ -634,6 +634,7 @@ func resolveKconfig(m *MapSpec) error {
 
 	type configInfo struct {
 		offset uint32
+		size   uint32
 		typ    btf.Type
 	}
 
@@ -675,6 +676,7 @@ func resolveKconfig(m *MapSpec) error {
 		default: // Catch CONFIG_*.
 			configs[n] = configInfo{
 				offset: vsi.Offset,
+				size:   vsi.Size,
 				typ:    v.Type,
 			}
 		}
@@ -701,10 +703,10 @@ func resolveKconfig(m *MapSpec) error {
 		for n, info := range configs {
 			value, ok := kernelConfig[n]
 			if !ok {
-				return fmt.Errorf("config option %q does not exists for this kernel", n)
+				return fmt.Errorf("config option %q does not exist on this kernel", n)
 			}
 
-			err := kconfig.PutValue(data[info.offset:], info.typ, value)
+			err := kconfig.PutValue(data[info.offset:info.offset+info.size], info.typ, value)
 			if err != nil {
 				return fmt.Errorf("problem adding value for %s: %w", n, err)
 			}

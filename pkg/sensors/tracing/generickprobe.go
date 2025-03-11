@@ -25,11 +25,14 @@ import (
 	"github.com/cilium/tetragon/pkg/bpf"
 	"github.com/cilium/tetragon/pkg/btf"
 	"github.com/cilium/tetragon/pkg/cgtracker"
+	"github.com/cilium/tetragon/pkg/config"
+	conf "github.com/cilium/tetragon/pkg/config"
 	"github.com/cilium/tetragon/pkg/eventhandler"
 	"github.com/cilium/tetragon/pkg/grpc/tracing"
 	"github.com/cilium/tetragon/pkg/idtable"
 	"github.com/cilium/tetragon/pkg/k8s/apis/cilium.io/v1alpha1"
 	"github.com/cilium/tetragon/pkg/kernels"
+	"github.com/cilium/tetragon/pkg/ksyms"
 	"github.com/cilium/tetragon/pkg/logger"
 	"github.com/cilium/tetragon/pkg/metrics/kprobemetrics"
 	"github.com/cilium/tetragon/pkg/observer"
@@ -37,6 +40,7 @@ import (
 	"github.com/cilium/tetragon/pkg/policyfilter"
 	"github.com/cilium/tetragon/pkg/selectors"
 	"github.com/cilium/tetragon/pkg/sensors"
+	"github.com/cilium/tetragon/pkg/sensors/base"
 	"github.com/cilium/tetragon/pkg/sensors/program"
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/sirupsen/logrus"
@@ -245,7 +249,7 @@ func filterMaps(load *program.Program, kprobeEntry *genericKprobe) []*program.Ma
 	return maps
 }
 
-func createMultiKprobeSensor(policyName string, multiIDs []idtable.EntryID, has hasMaps) ([]*program.Program, []*program.Map, error) {
+func createMultiKprobeSensor(polInfo *policyInfo, multiIDs []idtable.EntryID, has hasMaps) ([]*program.Program, []*program.Map, error) {
 	var multiRetIDs []idtable.EntryID
 	var progs []*program.Program
 	var maps []*program.Map
@@ -269,7 +273,7 @@ func createMultiKprobeSensor(policyName string, multiIDs []idtable.EntryID, has 
 
 	loadProgName := "bpf_multi_kprobe_v53.o"
 	loadProgRetName := "bpf_multi_retkprobe_v53.o"
-	if kernels.EnableV61Progs() {
+	if conf.EnableV61Progs() {
 		loadProgName = "bpf_multi_kprobe_v61.o"
 		loadProgRetName = "bpf_multi_retkprobe_v61.o"
 	} else if kernels.MinKernelVersion("5.11") {
@@ -284,7 +288,7 @@ func createMultiKprobeSensor(policyName string, multiIDs []idtable.EntryID, has 
 		"multi_kprobe",
 		"generic_kprobe").
 		SetLoaderData(multiIDs).
-		SetPolicy(policyName)
+		SetPolicy(polInfo.name)
 	progs = append(progs, load)
 
 	fdinstall := program.MapBuilderSensor("fdinstall_map", load)
@@ -324,12 +328,12 @@ func createMultiKprobeSensor(policyName string, multiIDs []idtable.EntryID, has 
 	maps = append(maps, stackTraceMap)
 	data.stackTraceMap = stackTraceMap
 
-	if kernels.EnableLargeProgs() {
+	if conf.EnableLargeProgs() {
 		socktrack := program.MapBuilderSensor("socktrack_map", load)
 		maps = append(maps, socktrack)
 	}
 
-	if kernels.EnableLargeProgs() {
+	if conf.EnableLargeProgs() {
 		ratelimitMap := program.MapBuilderSensor("ratelimit_map", load)
 		if has.rateLimit {
 			ratelimitMap.SetMaxEntries(ratelimitMapMaxEntries)
@@ -354,6 +358,8 @@ func createMultiKprobeSensor(policyName string, multiIDs []idtable.EntryID, has 
 	}
 	maps = append(maps, overrideTasksMap)
 
+	maps = append(maps, polInfo.policyConfMap(load))
+
 	if len(multiRetIDs) != 0 {
 		loadret := program.Builder(
 			path.Join(option.Config.HubbleLib, loadProgRetName),
@@ -363,7 +369,7 @@ func createMultiKprobeSensor(policyName string, multiIDs []idtable.EntryID, has 
 			"generic_kprobe").
 			SetRetProbe(true).
 			SetLoaderData(multiRetIDs).
-			SetPolicy(policyName)
+			SetPolicy(polInfo.name)
 		progs = append(progs, loadret)
 
 		retProbe := program.MapBuilderSensor("retprobe_map", loadret)
@@ -423,6 +429,12 @@ func preValidateKprobes(name string, kprobes []v1alpha1.KProbeSpec, lists []v1al
 		return err
 	}
 
+	// get kernel symbols
+	ks, err := ksyms.KernelSymbols()
+	if err != nil {
+		return fmt.Errorf("validateKprobeSpec: ksyms.KernelSymbols: %w", err)
+	}
+
 	for i := range kprobes {
 		f := &kprobes[i]
 
@@ -476,13 +488,13 @@ func preValidateKprobes(name string, kprobes []v1alpha1.KProbeSpec, lists []v1al
 			}
 		}
 
-		if selectors.HasSigkillAction(f) && !kernels.EnableLargeProgs() {
+		if selectors.HasSigkillAction(f) && !conf.EnableLargeProgs() {
 			return fmt.Errorf("sigkill action requires kernel >= 5.3.0")
 		}
 
 		for idx := range calls {
 			// Now go over BTF validation
-			if err := btf.ValidateKprobeSpec(btfobj, calls[idx], f); err != nil {
+			if err := btf.ValidateKprobeSpec(btfobj, calls[idx], f, ks); err != nil {
 				if warn, ok := err.(*btf.ValidationWarn); ok {
 					logger.GetLogger().WithFields(logrus.Fields{
 						"sensor": name,
@@ -562,10 +574,7 @@ func hasMapsSetup(spec *v1alpha1.TracingPolicySpec) hasMaps {
 func createGenericKprobeSensor(
 	spec *v1alpha1.TracingPolicySpec,
 	name string,
-	policyID policyfilter.PolicyID,
-	policyName string,
-	namespace string,
-	customHandler eventhandler.Handler,
+	polInfo *policyInfo,
 ) (*sensors.Sensor, error) {
 	var progs []*program.Program
 	var maps []*program.Map
@@ -576,16 +585,11 @@ func createGenericKprobeSensor(
 	kprobes := spec.KProbes
 	lists := spec.Lists
 
-	specOpts, err := getSpecOptions(spec.Options)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get spec options: %s", err)
-	}
-
 	// use multi kprobe only if:
 	// - it's not disabled by spec option
 	// - it's not disabled by command line option
 	// - there's support detected
-	if !specOpts.DisableKprobeMulti {
+	if !polInfo.specOpts.DisableKprobeMulti {
 		useMulti = !option.Config.DisableKprobeMulti && bpf.HasKprobeMulti()
 	}
 
@@ -596,9 +600,9 @@ func createGenericKprobeSensor(
 	in := addKprobeIn{
 		useMulti:      useMulti,
 		sensorPath:    name,
-		policyID:      policyID,
-		policyName:    policyName,
-		customHandler: customHandler,
+		policyID:      polInfo.policyID,
+		policyName:    polInfo.name,
+		customHandler: polInfo.customHandler,
 		selMaps:       selMaps,
 	}
 
@@ -630,22 +634,25 @@ func createGenericKprobeSensor(
 		}
 	}
 
+	var err error
 	if useMulti {
-		progs, maps, err = createMultiKprobeSensor(in.policyName, ids, has)
+		progs, maps, err = createMultiKprobeSensor(polInfo, ids, has)
 	} else {
-		progs, maps, err = createSingleKprobeSensor(ids, has)
+		progs, maps, err = createSingleKprobeSensor(polInfo, ids, has)
 	}
 
 	if err != nil {
 		return nil, err
 	}
 
+	maps = append(maps, program.MapUserFrom(base.ExecveMap))
+
 	return &sensors.Sensor{
 		Name:      name,
 		Progs:     progs,
 		Maps:      maps,
-		Policy:    policyName,
-		Namespace: namespace,
+		Policy:    polInfo.name,
+		Namespace: polInfo.namespace,
 		DestroyHook: func() error {
 			var errs error
 			for _, id := range ids {
@@ -668,6 +675,7 @@ func addKprobe(funcName string, instance int, f *v1alpha1.KProbeSpec, in *addKpr
 	var setRetprobe bool
 	var argRetprobe *v1alpha1.KProbeArg
 	var argsBTFSet [api.MaxArgsSupported]bool
+	var allBtfArgs [api.EventConfigMaxArgs][api.MaxBtfArgDepth]api.ConfigBtfArg
 
 	errFn := func(err error) (idtable.EntryID, error) {
 		return idtable.UninitializedEntryID, err
@@ -680,7 +688,7 @@ func addKprobe(funcName string, instance int, f *v1alpha1.KProbeSpec, in *addKpr
 	config := &api.EventConfig{}
 	config.PolicyID = uint32(in.policyID)
 	if len(f.ReturnArgAction) > 0 {
-		if !kernels.EnableLargeProgs() {
+		if !conf.EnableLargeProgs() {
 			return errFn(fmt.Errorf("ReturnArgAction requires kernel >=5.3"))
 		}
 		config.ArgReturnAction = selectors.ActionTypeFromString(f.ReturnArgAction)
@@ -734,6 +742,18 @@ func addKprobe(funcName string, instance int, f *v1alpha1.KProbeSpec, in *addKpr
 			argType = gt.GenericTypeFromString(a.Type)
 		}
 
+		if a.Resolve != "" && j < api.EventConfigMaxArgs {
+			if !bpf.HasProgramLargeSize() {
+				return errFn(fmt.Errorf("Error: Resolve flag can't be used for your kernel version. Please update to version 5.4 or higher or disable Resolve flag"))
+			}
+			lastBtfType, btfArg, err := resolveBtfArg(f.Call, a)
+			if err != nil {
+				return errFn(fmt.Errorf("Error on hook %q for index %d : %v", f.Call, a.Index, err))
+			}
+			allBtfArgs[j] = btfArg
+			argType = findTypeFromBtfType(a, lastBtfType)
+		}
+
 		if argType == gt.GenericInvalidType {
 			return errFn(fmt.Errorf("Arg(%d) type '%s' unsupported", j, a.Type))
 		}
@@ -742,7 +762,7 @@ func addKprobe(funcName string, instance int, f *v1alpha1.KProbeSpec, in *addKpr
 			if argType != gt.GenericCharBuffer {
 				logger.GetLogger().Warnf("maxData flag is ignored (supported for char_buf type)")
 			}
-			if !kernels.EnableLargeProgs() {
+			if !conf.EnableLargeProgs() {
 				logger.GetLogger().Warnf("maxData flag is ignored (supported from large programs)")
 			}
 		}
@@ -757,6 +777,7 @@ func addKprobe(funcName string, instance int, f *v1alpha1.KProbeSpec, in *addKpr
 			return errFn(fmt.Errorf("Error add arg: ArgType %s Index %d out of bounds",
 				a.Type, int(a.Index)))
 		}
+		config.BtfArg = allBtfArgs
 		config.Arg[a.Index] = int32(argType)
 		config.ArgM[a.Index] = uint32(argMValue)
 
@@ -882,10 +903,10 @@ func addKprobe(funcName string, instance int, f *v1alpha1.KProbeSpec, in *addKpr
 	return kprobeEntry.tableId, nil
 }
 
-func createKprobeSensorFromEntry(kprobeEntry *genericKprobe,
+func createKprobeSensorFromEntry(polInfo *policyInfo, kprobeEntry *genericKprobe,
 	progs []*program.Program, maps []*program.Map, has hasMaps) ([]*program.Program, []*program.Map) {
 
-	loadProgName, loadProgRetName := kernels.GenericKprobeObjs()
+	loadProgName, loadProgRetName := config.GenericKprobeObjs()
 	isSecurityFunc := strings.HasPrefix(kprobeEntry.funcName, "security_")
 
 	pinProg := kprobeEntry.funcName
@@ -953,12 +974,12 @@ func createKprobeSensorFromEntry(kprobeEntry *genericKprobe,
 	maps = append(maps, stackTraceMap)
 	kprobeEntry.data.stackTraceMap = stackTraceMap
 
-	if kernels.EnableLargeProgs() {
+	if conf.EnableLargeProgs() {
 		socktrack := program.MapBuilderSensor("socktrack_map", load)
 		maps = append(maps, socktrack)
 	}
 
-	if kernels.EnableLargeProgs() {
+	if conf.EnableLargeProgs() {
 		ratelimitMap := program.MapBuilderSensor("ratelimit_map", load)
 		if has.rateLimit {
 			// similarly as for stacktrace, we expand the max size only if
@@ -981,6 +1002,8 @@ func createKprobeSensorFromEntry(kprobeEntry *genericKprobe,
 		overrideTasksMap.SetMaxEntries(overrideMapMaxEntries)
 	}
 	maps = append(maps, overrideTasksMap)
+
+	maps = append(maps, polInfo.policyConfMap(load))
 
 	if kprobeEntry.loadArgs.retprobe {
 		pinRetProg := sensors.PathJoin(fmt.Sprintf("%s_return", kprobeEntry.funcName))
@@ -1022,7 +1045,7 @@ func createKprobeSensorFromEntry(kprobeEntry *genericKprobe,
 		}
 		maps = append(maps, fdinstall)
 
-		if kernels.EnableLargeProgs() {
+		if conf.EnableLargeProgs() {
 			socktrack := program.MapBuilderSensor("socktrack_map", loadret)
 			maps = append(maps, socktrack)
 		}
@@ -1033,7 +1056,7 @@ func createKprobeSensorFromEntry(kprobeEntry *genericKprobe,
 	return progs, maps
 }
 
-func createSingleKprobeSensor(ids []idtable.EntryID, has hasMaps) ([]*program.Program, []*program.Map, error) {
+func createSingleKprobeSensor(polInfo *policyInfo, ids []idtable.EntryID, has hasMaps) ([]*program.Program, []*program.Map, error) {
 	var progs []*program.Program
 	var maps []*program.Map
 
@@ -1049,7 +1072,7 @@ func createSingleKprobeSensor(ids []idtable.EntryID, has hasMaps) ([]*program.Pr
 		has.rateLimit = gk.hasRatelimit
 		has.override = gk.hasOverride
 
-		progs, maps = createKprobeSensorFromEntry(gk, progs, maps, has)
+		progs, maps = createKprobeSensorFromEntry(polInfo, gk, progs, maps, has)
 	}
 
 	return progs, maps, nil
@@ -1063,7 +1086,7 @@ func getMapLoad(load *program.Program, kprobeEntry *genericKprobe, index uint32)
 	return selectorsMaploads(state, index)
 }
 
-func loadSingleKprobeSensor(id idtable.EntryID, bpfDir string, load *program.Program, verbose int) error {
+func loadSingleKprobeSensor(id idtable.EntryID, bpfDir string, load *program.Program, maps []*program.Map, verbose int) error {
 	gk, err := genericKprobeTableGet(id)
 	if err != nil {
 		return err
@@ -1082,7 +1105,7 @@ func loadSingleKprobeSensor(id idtable.EntryID, bpfDir string, load *program.Pro
 	}
 	load.MapLoad = append(load.MapLoad, config)
 
-	if err := program.LoadKprobeProgram(bpfDir, load, verbose); err == nil {
+	if err := program.LoadKprobeProgram(bpfDir, load, maps, verbose); err == nil {
 		logger.GetLogger().Infof("Loaded generic kprobe program: %s -> %s", load.Name, load.Attach)
 	} else {
 		return err
@@ -1091,7 +1114,7 @@ func loadSingleKprobeSensor(id idtable.EntryID, bpfDir string, load *program.Pro
 	return err
 }
 
-func loadMultiKprobeSensor(ids []idtable.EntryID, bpfDir string, load *program.Program, verbose int) error {
+func loadMultiKprobeSensor(ids []idtable.EntryID, bpfDir string, load *program.Program, maps []*program.Map, verbose int) error {
 	bin_buf := make([]bytes.Buffer, len(ids))
 
 	data := &program.MultiKprobeAttachData{}
@@ -1126,7 +1149,7 @@ func loadMultiKprobeSensor(ids []idtable.EntryID, bpfDir string, load *program.P
 	load.OverrideFmodRet = false
 	load.SetAttachData(data)
 
-	if err := program.LoadMultiKprobeProgram(bpfDir, load, verbose); err == nil {
+	if err := program.LoadMultiKprobeProgram(bpfDir, load, maps, verbose); err == nil {
 		logger.GetLogger().Infof("Loaded generic kprobe sensor: %s -> %s", load.Name, load.Attach)
 	} else {
 		return err
@@ -1135,12 +1158,12 @@ func loadMultiKprobeSensor(ids []idtable.EntryID, bpfDir string, load *program.P
 	return nil
 }
 
-func loadGenericKprobeSensor(bpfDir string, load *program.Program, verbose int) error {
+func loadGenericKprobeSensor(bpfDir string, load *program.Program, maps []*program.Map, verbose int) error {
 	if id, ok := load.LoaderData.(idtable.EntryID); ok {
-		return loadSingleKprobeSensor(id, bpfDir, load, verbose)
+		return loadSingleKprobeSensor(id, bpfDir, load, maps, verbose)
 	}
 	if ids, ok := load.LoaderData.([]idtable.EntryID); ok {
-		return loadMultiKprobeSensor(ids, bpfDir, load, verbose)
+		return loadMultiKprobeSensor(ids, bpfDir, load, maps, verbose)
 	}
 	return fmt.Errorf("invalid loadData type: expecting idtable.EntryID/[] and got: %T (%v)",
 		load.LoaderData, load.LoaderData)
@@ -1357,7 +1380,7 @@ func retprobeMerge(prev pendingEvent, curr pendingEvent) *tracing.MsgGenericKpro
 }
 
 func (k *observerKprobeSensor) LoadProbe(args sensors.LoadProbeArgs) error {
-	return loadGenericKprobeSensor(args.BPFDir, args.Load, args.Verbose)
+	return loadGenericKprobeSensor(args.BPFDir, args.Load, args.Maps, args.Verbose)
 }
 
 func selectorsHaveRateLimit(selectors []v1alpha1.KProbeSelector) bool {

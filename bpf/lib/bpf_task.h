@@ -7,19 +7,7 @@
 #include "bpf_event.h"
 #include "bpf_helpers.h"
 #include "generic.h"
-
-/* __d_path_local flags */
-// #define UNRESOLVED_MOUNT_POINTS	   0x01 // (deprecated)
-// this error is returned by __d_path_local in the following cases:
-// - the path walk did not conclude (too many dentry)
-// - the path was too long to fit in the buffer
-#define UNRESOLVED_PATH_COMPONENTS 0x02
-
-#ifdef __LARGE_BPF_PROG
-#define PROBE_CWD_READ_ITERATIONS 128
-#else
-#define PROBE_CWD_READ_ITERATIONS 11
-#endif
+#include "vmlinux.h"
 
 FUNC_INLINE struct task_struct *get_parent(struct task_struct *t)
 {
@@ -57,9 +45,9 @@ FUNC_INLINE struct task_struct *get_task_from_pid(__u32 pid)
 	return task;
 }
 
-FUNC_INLINE __u32 get_task_pid_vnr(void)
+FUNC_INLINE __u32 get_task_pid_vnr_by_task(struct task_struct *t)
 {
-	struct task_struct *task = (struct task_struct *)get_current_task();
+	struct task_struct___local *task = (struct task_struct___local *)t;
 	int thread_pid_exists;
 	unsigned int level;
 	struct upid upid;
@@ -94,6 +82,13 @@ FUNC_INLINE __u32 get_task_pid_vnr(void)
 	probe_read_kernel(&upid, upid_sz,
 			  (void *)_(&pid->numbers) + (level * upid_sz));
 	return upid.nr;
+}
+
+FUNC_INLINE __u32 get_task_pid_vnr_curr(void)
+{
+	struct task_struct *task = (struct task_struct *)get_current_task();
+
+	return get_task_pid_vnr_by_task(task);
 }
 
 FUNC_INLINE __u32 event_find_parent_pid(struct task_struct *t)

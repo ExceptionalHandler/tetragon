@@ -3,14 +3,14 @@
 
 ## Table of Contents
 
+- [tetragon/bpf.proto](#tetragon_bpf-proto)
+    - [BpfCmd](#tetragon-BpfCmd)
+    - [BpfProgramType](#tetragon-BpfProgramType)
+  
 - [tetragon/capabilities.proto](#tetragon_capabilities-proto)
     - [CapabilitiesType](#tetragon-CapabilitiesType)
     - [ProcessPrivilegesChanged](#tetragon-ProcessPrivilegesChanged)
     - [SecureBitsType](#tetragon-SecureBitsType)
-  
-- [tetragon/bpf.proto](#tetragon_bpf-proto)
-    - [BpfCmd](#tetragon-BpfCmd)
-    - [BpfProgramType](#tetragon-BpfProgramType)
   
 - [tetragon/tetragon.proto](#tetragon_tetragon-proto)
     - [BinaryProperties](#tetragon-BinaryProperties)
@@ -37,6 +37,7 @@
     - [KprobePerfEvent](#tetragon-KprobePerfEvent)
     - [KprobeSkb](#tetragon-KprobeSkb)
     - [KprobeSock](#tetragon-KprobeSock)
+    - [KprobeSockaddr](#tetragon-KprobeSockaddr)
     - [KprobeTruncatedBytes](#tetragon-KprobeTruncatedBytes)
     - [KprobeUserNamespace](#tetragon-KprobeUserNamespace)
     - [Namespace](#tetragon-Namespace)
@@ -91,6 +92,8 @@
 - [tetragon/sensors.proto](#tetragon_sensors-proto)
     - [AddTracingPolicyRequest](#tetragon-AddTracingPolicyRequest)
     - [AddTracingPolicyResponse](#tetragon-AddTracingPolicyResponse)
+    - [ConfigureTracingPolicyRequest](#tetragon-ConfigureTracingPolicyRequest)
+    - [ConfigureTracingPolicyResponse](#tetragon-ConfigureTracingPolicyResponse)
     - [DeleteTracingPolicyRequest](#tetragon-DeleteTracingPolicyRequest)
     - [DeleteTracingPolicyResponse](#tetragon-DeleteTracingPolicyResponse)
     - [DisableSensorRequest](#tetragon-DisableSensorRequest)
@@ -124,111 +127,12 @@
   
     - [ConfigFlag](#tetragon-ConfigFlag)
     - [LogLevel](#tetragon-LogLevel)
+    - [TracingPolicyMode](#tetragon-TracingPolicyMode)
     - [TracingPolicyState](#tetragon-TracingPolicyState)
   
     - [FineGuidanceSensors](#tetragon-FineGuidanceSensors)
   
 - [Scalar Value Types](#scalar-value-types)
-
-
-
-<a name="tetragon_capabilities-proto"></a>
-<p align="right"><a href="#top">Top</a></p>
-
-## tetragon/capabilities.proto
-
-
- 
-
-
-<a name="tetragon-CapabilitiesType"></a>
-
-### CapabilitiesType
-
-
-| Name | Number | Description |
-| ---- | ------ | ----------- |
-| CAP_CHOWN | 0 | In a system with the [_POSIX_CHOWN_RESTRICTED] option defined, this overrides the restriction of changing file ownership and group ownership. |
-| DAC_OVERRIDE | 1 | Override all DAC access, including ACL execute access if [_POSIX_ACL] is defined. Excluding DAC access covered by CAP_LINUX_IMMUTABLE. |
-| CAP_DAC_READ_SEARCH | 2 | Overrides all DAC restrictions regarding read and search on files and directories, including ACL restrictions if [_POSIX_ACL] is defined. Excluding DAC access covered by &#34;$1&#34;_LINUX_IMMUTABLE. |
-| CAP_FOWNER | 3 | Overrides all restrictions about allowed operations on files, where file owner ID must be equal to the user ID, except where CAP_FSETID is applicable. It doesn&#39;t override MAC and DAC restrictions. |
-| CAP_FSETID | 4 | Overrides the following restrictions that the effective user ID shall match the file owner ID when setting the S_ISUID and S_ISGID bits on that file; that the effective group ID (or one of the supplementary group IDs) shall match the file owner ID when setting the S_ISGID bit on that file; that the S_ISUID and S_ISGID bits are cleared on successful return from chown(2) (not implemented). |
-| CAP_KILL | 5 | Overrides the restriction that the real or effective user ID of a process sending a signal must match the real or effective user ID of the process receiving the signal. |
-| CAP_SETGID | 6 | Allows forged gids on socket credentials passing. |
-| CAP_SETUID | 7 | Allows forged pids on socket credentials passing. |
-| CAP_SETPCAP | 8 | Without VFS support for capabilities: Transfer any capability in your permitted set to any pid, remove any capability in your permitted set from any pid With VFS support for capabilities (neither of above, but) Add any capability from current&#39;s capability bounding set to the current process&#39; inheritable set Allow taking bits out of capability bounding set Allow modification of the securebits for a process |
-| CAP_LINUX_IMMUTABLE | 9 | Allow modification of S_IMMUTABLE and S_APPEND file attributes |
-| CAP_NET_BIND_SERVICE | 10 | Allows binding to ATM VCIs below 32 |
-| CAP_NET_BROADCAST | 11 | Allow broadcasting, listen to multicast |
-| CAP_NET_ADMIN | 12 | Allow activation of ATM control sockets |
-| CAP_NET_RAW | 13 | Allow binding to any address for transparent proxying (also via NET_ADMIN) |
-| CAP_IPC_LOCK | 14 | Allow mlock and mlockall (which doesn&#39;t really have anything to do with IPC) |
-| CAP_IPC_OWNER | 15 | Override IPC ownership checks |
-| CAP_SYS_MODULE | 16 | Insert and remove kernel modules - modify kernel without limit |
-| CAP_SYS_RAWIO | 17 | Allow sending USB messages to any device via /dev/bus/usb |
-| CAP_SYS_CHROOT | 18 | Allow use of chroot() |
-| CAP_SYS_PTRACE | 19 | Allow ptrace() of any process |
-| CAP_SYS_PACCT | 20 | Allow configuration of process accounting |
-| CAP_SYS_ADMIN | 21 | Allow everything under CAP_BPF and CAP_PERFMON for backward compatibility |
-| CAP_SYS_BOOT | 22 | Allow use of reboot() |
-| CAP_SYS_NICE | 23 | Allow setting cpu affinity on other processes |
-| CAP_SYS_RESOURCE | 24 | Control memory reclaim behavior |
-| CAP_SYS_TIME | 25 | Allow setting the real-time clock |
-| CAP_SYS_TTY_CONFIG | 26 | Allow vhangup() of tty |
-| CAP_MKNOD | 27 | Allow the privileged aspects of mknod() |
-| CAP_LEASE | 28 | Allow taking of leases on files |
-| CAP_AUDIT_WRITE | 29 | Allow writing the audit log via unicast netlink socket |
-| CAP_AUDIT_CONTROL | 30 | Allow configuration of audit via unicast netlink socket |
-| CAP_SETFCAP | 31 | Set or remove capabilities on files |
-| CAP_MAC_OVERRIDE | 32 | Override MAC access. The base kernel enforces no MAC policy. An LSM may enforce a MAC policy, and if it does and it chooses to implement capability based overrides of that policy, this is the capability it should use to do so. |
-| CAP_MAC_ADMIN | 33 | Allow MAC configuration or state changes. The base kernel requires no MAC configuration. An LSM may enforce a MAC policy, and if it does and it chooses to implement capability based checks on modifications to that policy or the data required to maintain it, this is the capability it should use to do so. |
-| CAP_SYSLOG | 34 | Allow configuring the kernel&#39;s syslog (printk behaviour) |
-| CAP_WAKE_ALARM | 35 | Allow triggering something that will wake the system |
-| CAP_BLOCK_SUSPEND | 36 | Allow preventing system suspends |
-| CAP_AUDIT_READ | 37 | Allow reading the audit log via multicast netlink socket |
-| CAP_PERFMON | 38 | Allow system performance and observability privileged operations using perf_events, i915_perf and other kernel subsystems |
-| CAP_BPF | 39 | CAP_BPF allows the following BPF operations: - Creating all types of BPF maps - Advanced verifier features - Indirect variable access - Bounded loops - BPF to BPF function calls - Scalar precision tracking - Larger complexity limits - Dead code elimination - And potentially other features - Loading BPF Type Format (BTF) data - Retrieve xlated and JITed code of BPF programs - Use bpf_spin_lock() helper CAP_PERFMON relaxes the verifier checks further: - BPF progs can use of pointer-to-integer conversions - speculation attack hardening measures are bypassed - bpf_probe_read to read arbitrary kernel memory is allowed - bpf_trace_printk to print kernel memory is allowed CAP_SYS_ADMIN is required to use bpf_probe_write_user. CAP_SYS_ADMIN is required to iterate system wide loaded programs, maps, links, BTFs and convert their IDs to file descriptors. CAP_PERFMON and CAP_BPF are required to load tracing programs. CAP_NET_ADMIN and CAP_BPF are required to load networking programs. |
-| CAP_CHECKPOINT_RESTORE | 40 | Allow writing to ns_last_pid |
-
-
-
-<a name="tetragon-ProcessPrivilegesChanged"></a>
-
-### ProcessPrivilegesChanged
-Reasons of why the process privileges changed.
-
-| Name | Number | Description |
-| ---- | ------ | ----------- |
-| PRIVILEGES_CHANGED_UNSET | 0 |  |
-| PRIVILEGES_RAISED_EXEC_FILE_CAP | 1 | A privilege elevation happened due to the execution of a binary with file capability sets. The kernel supports associating capability sets with an executable file using `setcap` command. The file capability sets are stored in an extended attribute (see https://man7.org/linux/man-pages/man7/xattr.7.html) named `security.capability`. The file capability sets, in conjunction with the capability sets of the process, determine the process capabilities and privileges after the `execve` system call. For further reference, please check sections `File capability extended attribute versioning` and `Namespaced file capabilities` of the capabilities man pages: https://man7.org/linux/man-pages/man7/capabilities.7.html. The new granted capabilities can be listed inside the `process` object. |
-| PRIVILEGES_RAISED_EXEC_FILE_SETUID | 2 | A privilege elevation happened due to the execution of a binary with set-user-ID to root. When a process with nonzero UIDs executes a binary with a set-user-ID to root also known as suid-root executable, then the kernel switches the effective user ID to 0 (root) which is a privilege elevation operation since it grants access to resources owned by the root user. The effective user ID is listed inside the `process_credentials` part of the `process` object. For further reading, section `Capabilities and execution of programs by root` of https://man7.org/linux/man-pages/man7/capabilities.7.html. Afterward the kernel recalculates the capability sets of the process and grants all capabilities in the permitted and effective capability sets, except those masked out by the capability bounding set. If the binary also have file capability sets then these bits are honored and the process gains just the capabilities granted by the file capability sets (i.e., not all capabilities, as it would occur when executing a set-user-ID to root binary that does not have any associated file capabilities). This is described in section `Set-user-ID-root programs that have file capabilities` of https://man7.org/linux/man-pages/man7/capabilities.7.html. The new granted capabilities can be listed inside the `process` object. There is one exception for the special treatments of set-user-ID to root execution receiving all capabilities, if the `SecBitNoRoot` bit of the Secure bits is set, then the kernel does not grant any capability. Please check section: `The securebits flags: establishing a capabilities-only environment` of the capabilities man pages: https://man7.org/linux/man-pages/man7/capabilities.7.html |
-| PRIVILEGES_RAISED_EXEC_FILE_SETGID | 3 | A privilege elevation happened due to the execution of a binary with set-group-ID to root. When a process with nonzero GIDs executes a binary with a set-group-ID to root, the kernel switches the effective group ID to 0 (root) which is a privilege elevation operation since it grants access to resources owned by the root group. The effective group ID is listed inside the `process_credentials` part of the `process` object. |
-
-
-
-<a name="tetragon-SecureBitsType"></a>
-
-### SecureBitsType
-
-
-| Name | Number | Description |
-| ---- | ------ | ----------- |
-| SecBitNotSet | 0 |  |
-| SecBitNoRoot | 1 | When set UID 0 has no special privileges. When unset, inheritance of root-permissions and suid-root executable under compatibility mode is supported. If the effective uid of the new process is 0 then the effective and inheritable bitmasks of the executable file is raised. If the real uid is 0, the effective (legacy) bit of the executable file is raised. |
-| SecBitNoRootLocked | 2 | Make bit-0 SecBitNoRoot immutable |
-| SecBitNoSetUidFixup | 4 | When set, setuid to/from uid 0 does not trigger capability-&#34;fixup&#34;. When unset, to provide compatiblility with old programs relying on set*uid to gain/lose privilege, transitions to/from uid 0 cause capabilities to be gained/lost. |
-| SecBitNoSetUidFixupLocked | 8 | Make bit-2 SecBitNoSetUidFixup immutable |
-| SecBitKeepCaps | 16 | When set, a process can retain its capabilities even after transitioning to a non-root user (the set-uid fixup suppressed by bit 2). Bit-4 is cleared when a process calls exec(); setting both bit 4 and 5 will create a barrier through exec that no exec()&#39;d child can use this feature again. |
-| SecBitKeepCapsLocked | 32 | Make bit-4 SecBitKeepCaps immutable |
-| SecBitNoCapAmbientRaise | 64 | When set, a process cannot add new capabilities to its ambient set. |
-| SecBitNoCapAmbientRaiseLocked | 128 | Make bit-6 SecBitNoCapAmbientRaise immutable |
-
-
- 
-
- 
-
- 
 
 
 
@@ -328,6 +232,106 @@ Reasons of why the process privileges changed.
 | BPF_PROG_TYPE_SK_LOOKUP | 30 |  |
 | BPF_PROG_TYPE_SYSCALL | 31 |  |
 | BPF_PROG_TYPE_NETFILTER | 32 |  |
+
+
+ 
+
+ 
+
+ 
+
+
+
+<a name="tetragon_capabilities-proto"></a>
+<p align="right"><a href="#top">Top</a></p>
+
+## tetragon/capabilities.proto
+
+
+ 
+
+
+<a name="tetragon-CapabilitiesType"></a>
+
+### CapabilitiesType
+
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| CAP_CHOWN | 0 | In a system with the [_POSIX_CHOWN_RESTRICTED] option defined, this overrides the restriction of changing file ownership and group ownership. |
+| DAC_OVERRIDE | 1 | Override all DAC access, including ACL execute access if [_POSIX_ACL] is defined. Excluding DAC access covered by CAP_LINUX_IMMUTABLE. |
+| CAP_DAC_READ_SEARCH | 2 | Overrides all DAC restrictions regarding read and search on files and directories, including ACL restrictions if [_POSIX_ACL] is defined. Excluding DAC access covered by &#34;$1&#34;_LINUX_IMMUTABLE. |
+| CAP_FOWNER | 3 | Overrides all restrictions about allowed operations on files, where file owner ID must be equal to the user ID, except where CAP_FSETID is applicable. It doesn&#39;t override MAC and DAC restrictions. |
+| CAP_FSETID | 4 | Overrides the following restrictions that the effective user ID shall match the file owner ID when setting the S_ISUID and S_ISGID bits on that file; that the effective group ID (or one of the supplementary group IDs) shall match the file owner ID when setting the S_ISGID bit on that file; that the S_ISUID and S_ISGID bits are cleared on successful return from chown(2) (not implemented). |
+| CAP_KILL | 5 | Overrides the restriction that the real or effective user ID of a process sending a signal must match the real or effective user ID of the process receiving the signal. |
+| CAP_SETGID | 6 | Allows forged gids on socket credentials passing. |
+| CAP_SETUID | 7 | Allows forged pids on socket credentials passing. |
+| CAP_SETPCAP | 8 | Without VFS support for capabilities: Transfer any capability in your permitted set to any pid, remove any capability in your permitted set from any pid With VFS support for capabilities (neither of above, but) Add any capability from current&#39;s capability bounding set to the current process&#39; inheritable set Allow taking bits out of capability bounding set Allow modification of the securebits for a process |
+| CAP_LINUX_IMMUTABLE | 9 | Allow modification of S_IMMUTABLE and S_APPEND file attributes |
+| CAP_NET_BIND_SERVICE | 10 | Allows binding to ATM VCIs below 32 |
+| CAP_NET_BROADCAST | 11 | Allow broadcasting, listen to multicast |
+| CAP_NET_ADMIN | 12 | Allow activation of ATM control sockets |
+| CAP_NET_RAW | 13 | Allow binding to any address for transparent proxying (also via NET_ADMIN) |
+| CAP_IPC_LOCK | 14 | Allow mlock and mlockall (which doesn&#39;t really have anything to do with IPC) |
+| CAP_IPC_OWNER | 15 | Override IPC ownership checks |
+| CAP_SYS_MODULE | 16 | Insert and remove kernel modules - modify kernel without limit |
+| CAP_SYS_RAWIO | 17 | Allow sending USB messages to any device via /dev/bus/usb |
+| CAP_SYS_CHROOT | 18 | Allow use of chroot() |
+| CAP_SYS_PTRACE | 19 | Allow ptrace() of any process |
+| CAP_SYS_PACCT | 20 | Allow configuration of process accounting |
+| CAP_SYS_ADMIN | 21 | Allow everything under CAP_BPF and CAP_PERFMON for backward compatibility |
+| CAP_SYS_BOOT | 22 | Allow use of reboot() |
+| CAP_SYS_NICE | 23 | Allow setting cpu affinity on other processes |
+| CAP_SYS_RESOURCE | 24 | Control memory reclaim behavior |
+| CAP_SYS_TIME | 25 | Allow setting the real-time clock |
+| CAP_SYS_TTY_CONFIG | 26 | Allow vhangup() of tty |
+| CAP_MKNOD | 27 | Allow the privileged aspects of mknod() |
+| CAP_LEASE | 28 | Allow taking of leases on files |
+| CAP_AUDIT_WRITE | 29 | Allow writing the audit log via unicast netlink socket |
+| CAP_AUDIT_CONTROL | 30 | Allow configuration of audit via unicast netlink socket |
+| CAP_SETFCAP | 31 | Set or remove capabilities on files |
+| CAP_MAC_OVERRIDE | 32 | Override MAC access. The base kernel enforces no MAC policy. An LSM may enforce a MAC policy, and if it does and it chooses to implement capability based overrides of that policy, this is the capability it should use to do so. |
+| CAP_MAC_ADMIN | 33 | Allow MAC configuration or state changes. The base kernel requires no MAC configuration. An LSM may enforce a MAC policy, and if it does and it chooses to implement capability based checks on modifications to that policy or the data required to maintain it, this is the capability it should use to do so. |
+| CAP_SYSLOG | 34 | Allow configuring the kernel&#39;s syslog (printk behaviour) |
+| CAP_WAKE_ALARM | 35 | Allow triggering something that will wake the system |
+| CAP_BLOCK_SUSPEND | 36 | Allow preventing system suspends |
+| CAP_AUDIT_READ | 37 | Allow reading the audit log via multicast netlink socket |
+| CAP_PERFMON | 38 | Allow system performance and observability privileged operations using perf_events, i915_perf and other kernel subsystems |
+| CAP_BPF | 39 | CAP_BPF allows the following BPF operations: - Creating all types of BPF maps - Advanced verifier features - Indirect variable access - Bounded loops - BPF to BPF function calls - Scalar precision tracking - Larger complexity limits - Dead code elimination - And potentially other features - Loading BPF Type Format (BTF) data - Retrieve xlated and JITed code of BPF programs - Use bpf_spin_lock() helper CAP_PERFMON relaxes the verifier checks further: - BPF progs can use of pointer-to-integer conversions - speculation attack hardening measures are bypassed - bpf_probe_read to read arbitrary kernel memory is allowed - bpf_trace_printk to print kernel memory is allowed CAP_SYS_ADMIN is required to use bpf_probe_write_user. CAP_SYS_ADMIN is required to iterate system wide loaded programs, maps, links, BTFs and convert their IDs to file descriptors. CAP_PERFMON and CAP_BPF are required to load tracing programs. CAP_NET_ADMIN and CAP_BPF are required to load networking programs. |
+| CAP_CHECKPOINT_RESTORE | 40 | Allow writing to ns_last_pid |
+
+
+
+<a name="tetragon-ProcessPrivilegesChanged"></a>
+
+### ProcessPrivilegesChanged
+Reasons of why the process privileges changed.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| PRIVILEGES_CHANGED_UNSET | 0 |  |
+| PRIVILEGES_RAISED_EXEC_FILE_CAP | 1 | A privilege elevation happened due to the execution of a binary with file capability sets. The kernel supports associating capability sets with an executable file using `setcap` command. The file capability sets are stored in an extended attribute (see https://man7.org/linux/man-pages/man7/xattr.7.html) named `security.capability`. The file capability sets, in conjunction with the capability sets of the process, determine the process capabilities and privileges after the `execve` system call. For further reference, please check sections `File capability extended attribute versioning` and `Namespaced file capabilities` of the capabilities man pages: https://man7.org/linux/man-pages/man7/capabilities.7.html. The new granted capabilities can be listed inside the `process` object. |
+| PRIVILEGES_RAISED_EXEC_FILE_SETUID | 2 | A privilege elevation happened due to the execution of a binary with set-user-ID to root. When a process with nonzero UIDs executes a binary with a set-user-ID to root also known as suid-root executable, then the kernel switches the effective user ID to 0 (root) which is a privilege elevation operation since it grants access to resources owned by the root user. The effective user ID is listed inside the `process_credentials` part of the `process` object. For further reading, section `Capabilities and execution of programs by root` of https://man7.org/linux/man-pages/man7/capabilities.7.html. Afterward the kernel recalculates the capability sets of the process and grants all capabilities in the permitted and effective capability sets, except those masked out by the capability bounding set. If the binary also have file capability sets then these bits are honored and the process gains just the capabilities granted by the file capability sets (i.e., not all capabilities, as it would occur when executing a set-user-ID to root binary that does not have any associated file capabilities). This is described in section `Set-user-ID-root programs that have file capabilities` of https://man7.org/linux/man-pages/man7/capabilities.7.html. The new granted capabilities can be listed inside the `process` object. There is one exception for the special treatments of set-user-ID to root execution receiving all capabilities, if the `SecBitNoRoot` bit of the Secure bits is set, then the kernel does not grant any capability. Please check section: `The securebits flags: establishing a capabilities-only environment` of the capabilities man pages: https://man7.org/linux/man-pages/man7/capabilities.7.html |
+| PRIVILEGES_RAISED_EXEC_FILE_SETGID | 3 | A privilege elevation happened due to the execution of a binary with set-group-ID to root. When a process with nonzero GIDs executes a binary with a set-group-ID to root, the kernel switches the effective group ID to 0 (root) which is a privilege elevation operation since it grants access to resources owned by the root group. The effective group ID is listed inside the `process_credentials` part of the `process` object. |
+
+
+
+<a name="tetragon-SecureBitsType"></a>
+
+### SecureBitsType
+
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| SecBitNotSet | 0 |  |
+| SecBitNoRoot | 1 | When set UID 0 has no special privileges. When unset, inheritance of root-permissions and suid-root executable under compatibility mode is supported. If the effective uid of the new process is 0 then the effective and inheritable bitmasks of the executable file is raised. If the real uid is 0, the effective (legacy) bit of the executable file is raised. |
+| SecBitNoRootLocked | 2 | Make bit-0 SecBitNoRoot immutable |
+| SecBitNoSetUidFixup | 4 | When set, setuid to/from uid 0 does not trigger capability-&#34;fixup&#34;. When unset, to provide compatiblility with old programs relying on set*uid to gain/lose privilege, transitions to/from uid 0 cause capabilities to be gained/lost. |
+| SecBitNoSetUidFixupLocked | 8 | Make bit-2 SecBitNoSetUidFixup immutable |
+| SecBitKeepCaps | 16 | When set, a process can retain its capabilities even after transitioning to a non-root user (the set-uid fixup suppressed by bit 2). Bit-4 is cleared when a process calls exec(); setting both bit 4 and 5 will create a barrier through exec that no exec()&#39;d child can use this feature again. |
+| SecBitKeepCapsLocked | 32 | Make bit-4 SecBitKeepCaps immutable |
+| SecBitNoCapAmbientRaise | 64 | When set, a process cannot add new capabilities to its ambient set. |
+| SecBitNoCapAmbientRaiseLocked | 128 | Make bit-6 SecBitNoCapAmbientRaise immutable |
 
 
  
@@ -593,6 +597,7 @@ found.
 | net_dev_arg | [KprobeNetDev](#tetragon-KprobeNetDev) |  |  |
 | bpf_cmd_arg | [BpfCmd](#tetragon-BpfCmd) |  |  |
 | syscall_id | [SyscallId](#tetragon-SyscallId) |  |  |
+| sockaddr_arg | [KprobeSockaddr](#tetragon-KprobeSockaddr) |  |  |
 | label | [string](#string) |  |  |
 
 
@@ -807,6 +812,23 @@ found.
 
 
 
+<a name="tetragon-KprobeSockaddr"></a>
+
+### KprobeSockaddr
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| family | [string](#string) |  |  |
+| addr | [string](#string) |  |  |
+| port | [uint32](#uint32) |  |  |
+
+
+
+
+
+
 <a name="tetragon-KprobeTruncatedBytes"></a>
 
 ### KprobeTruncatedBytes
@@ -931,7 +953,7 @@ found.
 | cwd | [string](#string) |  | Current working directory of the process. |
 | binary | [string](#string) |  | Absolute path of the executed binary. |
 | arguments | [string](#string) |  | Arguments passed to the binary at execution. |
-| flags | [string](#string) |  | Flags are for debugging purposes only and should not be considered a reliable source of information. They hold various information about which syscalls generated events, use of internal Tetragon buffers, errors and more. - `execve` This event is generated by an execve syscall for a new process. See procFs for the other option. A correctly formatted event should either set execve or procFS (described next). - `procFS` This event is generated from a proc interface. This happens at Tetragon init when existing processes are being loaded into Tetragon event buffer. All events should have either execve or procFS set. - `truncFilename` Indicates a truncated processes filename because the buffer size is too small to contain the process filename. Consider increasing buffer size to avoid this. - `truncArgs` Indicates truncated the processes arguments because the buffer size was too small to contain all exec args. Consider increasing buffer size to avoid this. - `taskWalk` Primarily useful for debugging. Indicates a walked process hierarchy to find a parent process in the Tetragon buffer. This may happen when we did not receive an exec event for the immediate parent of a process. Typically means we are looking at a fork that in turn did another fork we don&#39;t currently track fork events exactly and instead push an event with the original parent exec data. This flag can provide this insight into the event if needed. - `miss` An error flag indicating we could not find parent info in the Tetragon event buffer. If this is set it should be reported to Tetragon developers for debugging. Tetragon will do its best to recover information about the process from available kernel data structures instead of using cached info in this case. However, args will not be available. - `needsAUID` An internal flag for Tetragon to indicate the audit has not yet been resolved. The BPF hooks look at this flag to determine if probing the audit system is necessary. - `errorFilename` An error flag indicating an error happened while reading the filename. If this is set it should be reported to Tetragon developers for debugging. - `errorArgs` An error flag indicating an error happened while reading the process args. If this is set it should be reported to Tetragon developers for debugging - `needsCWD` An internal flag for Tetragon to indicate the current working directory has not yet been resolved. The Tetragon hooks look at this flag to determine if probing the CWD is necessary. - `noCWDSupport` Indicates that CWD is removed from the event because the buffer size is too small. Consider increasing buffer size to avoid this. - `rootCWD` Indicates that CWD is the root directory. This is necessary to inform readers the CWD is not in the event buffer and is &#39;/&#39; instead. - `errorCWD` An error flag indicating an error occurred while reading the CWD of a process. If this is set it should be reported to Tetragon developers for debugging. - `clone` Indicates the process issued a clone before exec*. This is the general flow to exec* a new process, however its possible to replace the current process with a new process by doing an exec* without a clone. In this case the flag will be omitted and the same PID will be used by the kernel for both the old process and the newly exec&#39;d process. |
+| flags | [string](#string) |  | Flags are for debugging purposes only and should not be considered a reliable source of information. They hold various information about which syscalls generated events, use of internal Tetragon buffers, errors and more. - `execve` This event is generated by an execve syscall for a new process. See procFs for the other option. A correctly formatted event should either set execve or procFS (described next). - `procFS` This event is generated from a proc interface. This happens at Tetragon init when existing processes are being loaded into Tetragon event buffer. All events should have either execve or procFS set. - `truncFilename` Indicates a truncated processes filename because the buffer size is too small to contain the process filename. Consider increasing buffer size to avoid this. - `truncArgs` Indicates truncated the processes arguments because the buffer size was too small to contain all exec args. Consider increasing buffer size to avoid this. - `taskWalk` Primarily useful for debugging. Indicates a walked process hierarchy to find a parent process in the Tetragon buffer. This may happen when we did not receive an exec event for the immediate parent of a process. Typically means we are looking at a fork that in turn did another fork we don&#39;t currently track fork events exactly and instead push an event with the original parent exec data. This flag can provide this insight into the event if needed. - `miss` An error flag indicating we could not find parent info in the Tetragon event buffer. If this is set it should be reported to Tetragon developers for debugging. Tetragon will do its best to recover information about the process from available kernel data structures instead of using cached info in this case. However, args will not be available. - `needsAUID` An internal flag for Tetragon to indicate the audit has not yet been resolved. The BPF hooks look at this flag to determine if probing the audit system is necessary. - `errorFilename` An error flag indicating an error happened while reading the filename. If this is set it should be reported to Tetragon developers for debugging. - `errorArgs` An error flag indicating an error happened while reading the process args. If this is set it should be reported to Tetragon developers for debugging - `needsCWD` An internal flag for Tetragon to indicate the current working directory has not yet been resolved. The Tetragon hooks look at this flag to determine if probing the CWD is necessary. - `noCWDSupport` Indicates that CWD is removed from the event because the buffer size is too small. Consider increasing buffer size to avoid this. - `rootCWD` Indicates that CWD is the root directory. This is necessary to inform readers the CWD is not in the event buffer and is &#39;/&#39; instead. - `errorCWD` An error flag indicating an error occurred while reading the CWD of a process. If this is set it should be reported to Tetragon developers for debugging. - `clone` Indicates the process issued a clone before exec*. This is the general flow to exec* a new process, however its possible to replace the current process with a new process by doing an exec* without a clone. In this case the flag will be omitted and the same PID will be used by the kernel for both the old process and the newly exec&#39;d process. - `unknown` Indicates the process was not found in the process cache and contains just pid and start time. |
 | start_time | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  | Start time of the execution. |
 | auid | [google.protobuf.UInt32Value](#google-protobuf-UInt32Value) |  | Audit user ID, this ID is assigned to a user upon login and is inherited by every process even when the user&#39;s identity changes. For example, by switching user accounts with su - john. |
 | pod | [Pod](#tetragon-Pod) |  | Information about the the Kubernetes Pod where the event originated. |
@@ -1006,6 +1028,7 @@ found.
 | signal | [string](#string) |  | Signal that the process received when it exited, for example SIGKILL or SIGTERM (list all signal names with `kill -l`). If there is no signal handler implemented for a specific process, we report the exit status code that can be found in the status field. |
 | status | [uint32](#uint32) |  | Status code on process exit. For example, the status code can indicate if an error was encountered or the program exited successfully. |
 | time | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  | Date and time of the event. |
+| ancestors | [Process](#tetragon-Process) | repeated | Ancestors of the process beyond the immediate parent. |
 
 
 
@@ -1032,6 +1055,7 @@ found.
 | message | [string](#string) |  | Short message of the Tracing Policy to inform users what is going on. |
 | tags | [string](#string) | repeated | Tags of the Tracing Policy to categorize the event. |
 | user_stack_trace | [StackTraceEntry](#tetragon-StackTraceEntry) | repeated | User-mode stack trace to the call. |
+| ancestors | [Process](#tetragon-Process) | repeated | Ancestors of the process beyond the immediate parent. |
 
 
 
@@ -1071,6 +1095,7 @@ loader sensor event triggered for loaded binary/library
 | args | [KprobeArgument](#tetragon-KprobeArgument) | repeated | Arguments definition of the observed LSM hook. |
 | action | [KprobeAction](#tetragon-KprobeAction) |  | Action performed when the LSM hook matched. |
 | tags | [string](#string) | repeated | Tags of the Tracing Policy to categorize the event. |
+| ancestors | [Process](#tetragon-Process) | repeated | Ancestors of the process beyond the immediate parent. |
 | ima_hash | [string](#string) |  | IMA file hash. Format algorithm:value. |
 
 
@@ -1095,6 +1120,7 @@ loader sensor event triggered for loaded binary/library
 | action | [KprobeAction](#tetragon-KprobeAction) |  | Action performed when the tracepoint matched. |
 | message | [string](#string) |  | Short message of the Tracing Policy to inform users what is going on. |
 | tags | [string](#string) | repeated | Tags of the Tracing Policy to categorize the event. |
+| ancestors | [Process](#tetragon-Process) | repeated | Ancestors of the process beyond the immediate parent. |
 
 
 
@@ -1117,6 +1143,7 @@ loader sensor event triggered for loaded binary/library
 | message | [string](#string) |  | Short message of the Tracing Policy to inform users what is going on. |
 | args | [KprobeArgument](#tetragon-KprobeArgument) | repeated | Arguments definition of the observed uprobe. |
 | tags | [string](#string) | repeated | Tags of the Tracing Policy to categorize the event. |
+| ancestors | [Process](#tetragon-Process) | repeated | Ancestors of the process beyond the immediate parent. |
 
 
 
@@ -1430,6 +1457,7 @@ Capability set to filter over. NOTE: you may specify only ONE set here.
 | parent_arguments_regex | [string](#string) | repeated | Filter by process.parent.arguments field using RE2 regular expression syntax: https://github.com/google/re2/wiki/Syntax |
 | container_id | [string](#string) | repeated | Filter by the container ID in the process.docker field using RE2 regular expression syntax: https://github.com/google/re2/wiki/Syntax |
 | in_init_tree | [google.protobuf.BoolValue](#google-protobuf-BoolValue) |  | Filter containerized processes based on whether they are descendants of the container&#39;s init process. This can be used, for example, to watch for processes injected into a container via docker exec, kubectl exec, or similar mechanisms. |
+| ancestor_binary_regex | [string](#string) | repeated | Filter ancestor processes&#39; binaries using RE2 regular expression syntax. |
 
 
 
@@ -1694,6 +1722,34 @@ Determines the behavior of a field filter
 <a name="tetragon-AddTracingPolicyResponse"></a>
 
 ### AddTracingPolicyResponse
+
+
+
+
+
+
+
+<a name="tetragon-ConfigureTracingPolicyRequest"></a>
+
+### ConfigureTracingPolicyRequest
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| name | [string](#string) |  |  |
+| namespace | [string](#string) |  |  |
+| enable | [bool](#bool) | optional |  |
+| mode | [TracingPolicyMode](#tetragon-TracingPolicyMode) | optional |  |
+
+
+
+
+
+
+<a name="tetragon-ConfigureTracingPolicyResponse"></a>
+
+### ConfigureTracingPolicyResponse
 
 
 
@@ -2009,7 +2065,7 @@ Determines the behavior of a field filter
 | process | [Process](#tetragon-Process) |  |  |
 | color | [string](#string) |  |  |
 | refcnt | [google.protobuf.UInt32Value](#google-protobuf-UInt32Value) |  |  |
-| refcnt_ops | [ProcessInternal.RefcntOpsEntry](#tetragon-ProcessInternal-RefcntOpsEntry) | repeated | refcnt_ops is a map of operations to refcnt change keys can be: - &#34;process&#43;&#43;&#34;: process increased refcnt (i.e. this process starts) - &#34;process--&#34;: process decreased refcnt (i.e. this process exits) - &#34;parent&#43;&#43;&#34;: parent increased refcnt (i.e. a process starts that has this process as a parent) - &#34;parent--&#34;: parent decreased refcnt (i.e. a process exits that has this process as a parent) |
+| refcnt_ops | [ProcessInternal.RefcntOpsEntry](#tetragon-ProcessInternal-RefcntOpsEntry) | repeated | refcnt_ops is a map of operations to refcnt change keys can be: - &#34;process&#43;&#43;&#34;: process increased refcnt (i.e. this process starts) - &#34;process--&#34;: process decreased refcnt (i.e. this process exits) - &#34;parent&#43;&#43;&#34;: parent increased refcnt (i.e. a process starts that has this process as a parent) - &#34;parent--&#34;: parent decreased refcnt (i.e. a process exits that has this process as a parent) - &#34;ancestor&#43;&#43;&#34;: ancestor increased refcnt (i.e. a process starts that has this process as an ancestor) - &#34;ancestor--&#34;: ancestor decreased refcnt (i.e. a process exits that has this process as an ancestor) |
 
 
 
@@ -2124,6 +2180,7 @@ Determines the behavior of a field filter
 | error | [string](#string) |  | potential error of the policy |
 | state | [TracingPolicyState](#tetragon-TracingPolicyState) |  | current state of the tracing policy |
 | kernel_memory_bytes | [uint64](#uint64) |  | the amount of kernel memory in bytes used by policy&#39;s sensors non-shared BPF maps (memlock) |
+| mode | [TracingPolicyMode](#tetragon-TracingPolicyMode) |  | current mode of the tracing policy |
 
 
 
@@ -2161,6 +2218,19 @@ For now, we only want to support debug-related config flags to be configurable.
 
 
 
+<a name="tetragon-TracingPolicyMode"></a>
+
+### TracingPolicyMode
+
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| TP_MODE_UNKNOWN | 0 |  |
+| TP_MODE_ENFORCE | 1 |  |
+| TP_MODE_MONITOR | 2 |  |
+
+
+
 <a name="tetragon-TracingPolicyState"></a>
 
 ### TracingPolicyState
@@ -2194,6 +2264,7 @@ For now, we only want to support debug-related config flags to be configurable.
 | AddTracingPolicy | [AddTracingPolicyRequest](#tetragon-AddTracingPolicyRequest) | [AddTracingPolicyResponse](#tetragon-AddTracingPolicyResponse) |  |
 | DeleteTracingPolicy | [DeleteTracingPolicyRequest](#tetragon-DeleteTracingPolicyRequest) | [DeleteTracingPolicyResponse](#tetragon-DeleteTracingPolicyResponse) |  |
 | ListTracingPolicies | [ListTracingPoliciesRequest](#tetragon-ListTracingPoliciesRequest) | [ListTracingPoliciesResponse](#tetragon-ListTracingPoliciesResponse) |  |
+| ConfigureTracingPolicy | [ConfigureTracingPolicyRequest](#tetragon-ConfigureTracingPolicyRequest) | [ConfigureTracingPolicyResponse](#tetragon-ConfigureTracingPolicyResponse) | ConfigureTracingPolicy can be used to configure a loaded tracing policy. It can be used to: - enable/disable it - change its mode (enforcement vs monitoring) If multiple changes are requested and an error is encountered, the resulting state might have partial updates applied. In other words, the configuring a tracing policy is not atomic. |
 | EnableTracingPolicy | [EnableTracingPolicyRequest](#tetragon-EnableTracingPolicyRequest) | [EnableTracingPolicyResponse](#tetragon-EnableTracingPolicyResponse) |  |
 | DisableTracingPolicy | [DisableTracingPolicyRequest](#tetragon-DisableTracingPolicyRequest) | [DisableTracingPolicyResponse](#tetragon-DisableTracingPolicyResponse) |  |
 | ListSensors | [ListSensorsRequest](#tetragon-ListSensorsRequest) | [ListSensorsResponse](#tetragon-ListSensorsResponse) |  |

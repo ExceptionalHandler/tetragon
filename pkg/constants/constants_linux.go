@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright Authors of Tetragon
+
 package constants
 
 import (
@@ -55,5 +58,4 @@ const (
 	AF_SMC               = unix.AF_SMC
 	AF_XDP               = unix.AF_XDP
 	AF_MCTP              = unix.AF_MCTP
-	BPF_STATS_RUN_TIME   = unix.BPF_STATS_RUN_TIME
 )

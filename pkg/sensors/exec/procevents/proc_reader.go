@@ -5,18 +5,25 @@ package procevents
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
+	"time"
 	"unicode/utf8"
 
+	"github.com/cilium/ebpf"
 	"github.com/cilium/tetragon/pkg/api"
 	"github.com/cilium/tetragon/pkg/api/ops"
 	"github.com/cilium/tetragon/pkg/api/processapi"
+	"github.com/cilium/tetragon/pkg/bpf"
 	"github.com/cilium/tetragon/pkg/cgroups"
 	"github.com/cilium/tetragon/pkg/grpc/exec"
 	"github.com/cilium/tetragon/pkg/logger"
 	"github.com/cilium/tetragon/pkg/observer"
 	"github.com/cilium/tetragon/pkg/option"
 	"github.com/cilium/tetragon/pkg/reader/proc"
+	"github.com/cilium/tetragon/pkg/sensors"
+	"github.com/cilium/tetragon/pkg/sensors/base"
+	"github.com/cilium/tetragon/pkg/sensors/exec/execvemap"
 	"github.com/cilium/tetragon/pkg/sensors/exec/userinfo"
 	"github.com/sirupsen/logrus"
 )
@@ -242,6 +249,110 @@ func pushExecveEvents(p procs) {
 
 		observer.AllListeners(&m)
 	}
+}
+
+func updateExecveMapStats(procs int64) {
+
+	execveMapStats := base.GetExecveMapStats()
+
+	m, err := ebpf.LoadPinnedMap(filepath.Join(bpf.MapPrefixPath(), execveMapStats.Name), nil)
+	if err != nil {
+		logger.GetLogger().WithError(err).Errorf("Could not open execve_map_stats")
+		return
+	}
+	defer m.Close()
+
+	if err := sensors.UpdateStatsMap(m, procs); err != nil {
+		logger.GetLogger().WithError(err).
+			Errorf("Failed to update execve_map_stats with procfs stats: %s", err)
+	}
+}
+
+func procToKeyValue(p procs, inInitTree map[uint32]struct{}) (*execvemap.ExecveKey, *execvemap.ExecveValue) {
+	k := &execvemap.ExecveKey{Pid: p.pid}
+	v := &execvemap.ExecveValue{}
+
+	v.Parent.Pid = p.ppid
+	v.Parent.Ktime = p.pktime
+	v.Process.Pid = p.pid
+	v.Process.Ktime = p.ktime
+	v.Flags = 0
+	v.Nspid = p.nspid
+	v.Capabilities.Permitted = p.permitted
+	v.Capabilities.Effective = p.effective
+	v.Capabilities.Inheritable = p.inheritable
+	v.Namespaces.UtsInum = p.uts_ns
+	v.Namespaces.IpcInum = p.ipc_ns
+	v.Namespaces.MntInum = p.mnt_ns
+	v.Namespaces.PidInum = p.pid_ns
+	v.Namespaces.PidChildInum = p.pid_for_children_ns
+	v.Namespaces.NetInum = p.net_ns
+	v.Namespaces.TimeInum = p.time_ns
+	v.Namespaces.TimeChildInum = p.time_for_children_ns
+	v.Namespaces.CgroupInum = p.cgroup_ns
+	v.Namespaces.UserInum = p.user_ns
+	pathLength := copy(v.Binary.Path[:], p.exe)
+	v.Binary.PathLength = int32(pathLength)
+
+	_, parentInInitTree := inInitTree[p.ppid]
+	if v.Nspid == 1 || parentInInitTree {
+		v.Flags |= api.EventInInitTree
+		inInitTree[p.pid] = struct{}{}
+	}
+
+	return k, v
+}
+
+func writeExecveMap(procs []procs) {
+	mapDir := bpf.MapPrefixPath()
+
+	execveMap := base.GetExecveMap()
+
+	m, err := ebpf.LoadPinnedMap(filepath.Join(mapDir, execveMap.Name), nil)
+	for i := 0; err != nil; i++ {
+		m, err = ebpf.LoadPinnedMap(filepath.Join(mapDir, execveMap.Name), nil)
+		if err != nil {
+			time.Sleep(mapRetryDelay * time.Second)
+		}
+		if i > maxMapRetries {
+			panic(err)
+		}
+	}
+
+	entries := m.MaxEntries()
+	logger.GetLogger().Infof("Maximum execve_map entries %d, need to add %d.", entries, len(procs))
+
+	i := uint32(0)
+
+	inInitTree := make(map[uint32]struct{})
+	for _, p := range procs {
+		k, v := procToKeyValue(p, inInitTree)
+		err := m.Put(k, v)
+		if err != nil {
+			logger.GetLogger().WithField("value", v).WithError(err).Warn("failed to put value in execve_map")
+		}
+
+		i++
+		if i == entries {
+			break
+		}
+	}
+	// In order for kprobe events from kernel ctx to not abort we need the
+	// execve lookup to map to a valid entry. So to simplify the kernel side
+	// and avoid having to add another branch of logic there to handle pid==0
+	// case we simply add it here.
+	m.Put(&execvemap.ExecveKey{Pid: kernelPid}, &execvemap.ExecveValue{
+		Parent: processapi.MsgExecveKey{
+			Pid:   kernelPid,
+			Ktime: 1},
+		Process: processapi.MsgExecveKey{
+			Pid:   kernelPid,
+			Ktime: 1,
+		},
+	})
+	m.Close()
+
+	updateExecveMapStats(int64(entries))
 }
 
 func pushEvents(ps []procs) {

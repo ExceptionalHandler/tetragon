@@ -3,7 +3,11 @@
 
 package generictypes
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/cilium/ebpf/btf"
+)
 
 const (
 	GenericIntType    = 1
@@ -56,6 +60,11 @@ const (
 	GenericDataLoc = 38
 
 	GenericNetDev = 39
+
+	GenericSockaddrType = 40
+	GenericSocketType   = 41
+
+	GenericDentryType = 42
 
 	GenericNopType     = -1
 	GenericInvalidType = -2
@@ -113,6 +122,9 @@ var GenericStringToType = map[string]int{
 	"linux_binprm":    GenericLinuxBinprmType,
 	"data_loc":        GenericDataLoc,
 	"net_device":      GenericNetDev,
+	"sockaddr":        GenericSockaddrType,
+	"socket":          GenericSocketType,
+	"dentry":          GenericDentryType,
 }
 
 var GenericTypeToStringTable = map[int]string{
@@ -155,6 +167,8 @@ var GenericTypeToStringTable = map[int]string{
 	GenericLinuxBinprmType: "linux_binprm",
 	GenericDataLoc:         "data_loc",
 	GenericNetDev:          "net_device",
+	GenericSockaddrType:    "sockaddr",
+	GenericSocketType:      "socket",
 	GenericInvalidType:     "",
 }
 
@@ -183,6 +197,27 @@ func GenericUserToKernelType(arg int) int {
 	ty, ok := GenericUserToKernel[arg]
 	if !ok {
 		ty = GenericInvalidType
+	}
+	return ty
+}
+
+func GenericTypeFromBTF(arg btf.Type) int {
+	ty, ok := GenericStringToType[arg.TypeName()]
+	if !ok {
+		switch t := arg.(type) {
+		case *btf.Restrict:
+			return GenericTypeFromBTF(t.Type)
+		case *btf.Volatile:
+			return GenericTypeFromBTF(t.Type)
+		case *btf.Const:
+			return GenericTypeFromBTF(t.Type)
+		case *btf.Typedef:
+			return GenericTypeFromBTF(t.Type)
+		case *btf.Pointer:
+			return GenericTypeFromBTF(t.Target)
+		default:
+			return GenericInvalidType
+		}
 	}
 	return ty
 }

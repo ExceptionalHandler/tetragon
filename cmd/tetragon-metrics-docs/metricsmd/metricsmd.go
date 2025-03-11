@@ -21,8 +21,9 @@ func New(targets map[string]string, init initMetricsFunc) *cobra.Command {
 			Metric: "go_info",
 			Overrides: []metricsmd.LabelValues{
 				{
-					Label:  "version",
-					Values: []string{"go1.22.0"},
+					Label: "version",
+					// renovate: datasource=golang-version
+					Values: []string{"go1.24.1"},
 				},
 			},
 		},
@@ -34,8 +35,9 @@ func New(targets map[string]string, init initMetricsFunc) *cobra.Command {
 					Values: []string{"931b70f2c9878ba985ba6b589827bea17da6ec33"},
 				},
 				{
-					Label:  "go_version",
-					Values: []string{"go1.22.0"},
+					Label: "go_version",
+					// renovate: datasource=golang-version
+					Values: []string{"go1.24.1"},
 				},
 				{
 					Label:  "modified",

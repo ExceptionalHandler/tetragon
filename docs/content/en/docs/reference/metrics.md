@@ -25,10 +25,18 @@ Build information about tetragon
 | label | values |
 | ----- | ------ |
 | `commit` | `931b70f2c9878ba985ba6b589827bea17da6ec33` |
-| `go_version` | `go1.22.0` |
+| `go_version` | `go1.24.1` |
 | `modified` | `false` |
 | `time ` | `2022-05-13T15:54:45Z` |
 | `version` | `v1.2.0` |
+
+### `tetragon_cri_cgidmap_resolutions_errors_total`
+
+number of cgroup id map (cgidmap) CRI resolutions that failed
+
+### `tetragon_cri_cgidmap_resolutions_total`
+
+number of total cgroup id map (cgidmap) CRI resolutions
 
 ### `tetragon_data_cache_capacity`
 
@@ -103,7 +111,7 @@ Number of failed fetches from the event cache. These won't be retried as they al
 
 | label | values |
 | ----- | ------ |
-| `entry_type` | `parent_info, pod_info, process_info` |
+| `entry_type` | `ancestors_info, parent_info, pod_info, process_info` |
 | `event_type` | `PROCESS_EXEC, PROCESS_EXIT, PROCESS_KPROBE, PROCESS_LOADER, PROCESS_LSM, PROCESS_THROTTLE, PROCESS_TRACEPOINT, PROCESS_UPROBE, RATE_LIMIT_INFO` |
 
 ### `tetragon_event_cache_fetch_retries_total`
@@ -112,7 +120,7 @@ Number of retries when fetching info from the event cache.
 
 | label | values |
 | ----- | ------ |
-| `entry_type` | `parent_info, pod_info, process_info` |
+| `entry_type` | `ancestors_info, parent_info, pod_info, process_info` |
 
 ### `tetragon_event_cache_inserts_total`
 
@@ -198,9 +206,17 @@ The total number of in-use entries per map.
 | ----- | ------ |
 | `map  ` | `execve_map, tg_execve_joined_info_map` |
 
-### `tetragon_map_errors_total`
+### `tetragon_map_errors_delete_total`
 
-The number of errors per map.
+The number of failed deletes per map.
+
+| label | values |
+| ----- | ------ |
+| `map  ` | `execve_map, tg_execve_joined_info_map` |
+
+### `tetragon_map_errors_update_total`
+
+The number of failed updates per map.
 
 | label | values |
 | ----- | ------ |
@@ -368,11 +384,11 @@ A summary of the wall-time pause (stop-the-world) duration in garbage collection
 
 ### `go_gc_gogc_percent`
 
-Heap size target percentage configured by the user, otherwise 100. This value is set by the GOGC environment variable, and the runtime/debug.SetGCPercent function. Sourced from /gc/gogc:percent
+Heap size target percentage configured by the user, otherwise 100. This value is set by the GOGC environment variable, and the runtime/debug.SetGCPercent function. Sourced from /gc/gogc:percent.
 
 ### `go_gc_gomemlimit_bytes`
 
-Go runtime memory limit configured by the user, otherwise math.MaxInt64. This value is set by the GOMEMLIMIT environment variable, and the runtime/debug.SetMemoryLimit function. Sourced from /gc/gomemlimit:bytes
+Go runtime memory limit configured by the user, otherwise math.MaxInt64. This value is set by the GOMEMLIMIT environment variable, and the runtime/debug.SetMemoryLimit function. Sourced from /gc/gomemlimit:bytes.
 
 ### `go_goroutines`
 
@@ -384,7 +400,7 @@ Information about the Go environment.
 
 | label | values |
 | ----- | ------ |
-| `version` | `go1.22.0` |
+| `version` | `go1.24.1` |
 
 ### `go_memstats_alloc_bytes`
 
@@ -476,11 +492,11 @@ Number of bytes obtained from system. Equals to /memory/classes/total:byte.
 
 ### `go_sched_gomaxprocs_threads`
 
-The current runtime.GOMAXPROCS setting, or the number of operating system threads that can execute user-level Go code simultaneously. Sourced from /sched/gomaxprocs:threads
+The current runtime.GOMAXPROCS setting, or the number of operating system threads that can execute user-level Go code simultaneously. Sourced from /sched/gomaxprocs:threads.
 
 ### `go_sched_latencies_seconds`
 
-Distribution of the time goroutines have spent in the scheduler in a runnable state before actually running. Bucket counts increase monotonically. Sourced from /sched/latencies:seconds
+Distribution of the time goroutines have spent in the scheduler in a runnable state before actually running. Bucket counts increase monotonically. Sourced from /sched/latencies:seconds.
 
 ### `go_threads`
 

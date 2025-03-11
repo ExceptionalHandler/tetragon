@@ -166,8 +166,9 @@ flags, or environment variables.
 | `parent_arguments_regex` | Filter by the container ID in the process.docker field using RE2 regular expression syntax: https://github.com/google/re2/wiki/Syntax | 
 | `container_id` | Filter by parent process arguments using a list of regular expressions. You can find the full syntax [here](https://github.com/google/re2/wiki/Syntax). | 
 | `in_init_tree` | Filter containerized processes based on whether they are descendants of the container's init process. This can be used, for example, to watch for processes injected into a container via docker exec, kubectl exec, or similar mechanisms. | 
+| `ancestor_binary_regex` | Filter process events by a list of regular expressions of ancestor processes' binary names (e.g. `"^/home/kubernetes/bin/kubelet$"`). You can find the full syntax [here](https://github.com/google/re2/wiki/Syntax). | 
 
-#### Field Filtering 
+#### Field Filtering
 
 In some cases, it is not desirable to include all of the fields exported in
 Tetragon events by default. In these cases, you can use field filters to
@@ -183,8 +184,8 @@ only the `process.binary`, `parent.binary`, and `pod.name` fields.
 
 By default, a field filter applies to all process events, although you
 can control this behaviour with the `"event_set"` key. For example, you
-can apply a field filter to `PROCESS_CONNECT` and `PROCESS_CLOSE` events
-by specifying `"event_set":["PROCESS_CONNECT","PROCESS_CLOSE"]` in the
+can apply a field filter to `PROCESS_KPROBE` and `PROCESS_TRACEPOINT` events
+by specifying `"event_set":["PROCESS_KPROBE","PROCESS_TRACEPOINT"]` in the
 filter definition.
 
 Each field filter has an `"action"` that determines what the filter

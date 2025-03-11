@@ -41,10 +41,17 @@ const (
 	KeyMetricsLabelFilter = "metrics-label-filter"
 	KeyServerAddress      = "server-address"
 	KeyGopsAddr           = "gops-address"
-	KeyEnableProcessCred  = "enable-process-cred"
-	KeyEnableProcessNs    = "enable-process-ns"
-	KeyTracingPolicy      = "tracing-policy"
-	KeyTracingPolicyDir   = "tracing-policy-dir"
+
+	KeyEnableProcessAncestors           = "enable-process-ancestors"
+	KeyEnableProcessKprobeAncestors     = "enable-process-kprobe-ancestors"
+	KeyEnableProcessTracepointAncestors = "enable-process-tracepoint-ancestors"
+	KeyEnableProcessUprobeAncestors     = "enable-process-uprobe-ancestors"
+	KeyEnableProcessLsmAncestors        = "enable-process-lsm-ancestors"
+
+	KeyEnableProcessCred = "enable-process-cred"
+	KeyEnableProcessNs   = "enable-process-ns"
+	KeyTracingPolicy     = "tracing-policy"
+	KeyTracingPolicyDir  = "tracing-policy-dir"
 
 	KeyCpuProfile = "cpuprofile"
 	KeyMemProfile = "memprofile"
@@ -81,8 +88,9 @@ const (
 
 	KeyReleasePinnedBPF = "release-pinned-bpf"
 
-	KeyEnablePolicyFilter      = "enable-policy-filter"
-	KeyEnablePolicyFilterDebug = "enable-policy-filter-debug"
+	KeyEnablePolicyFilter          = "enable-policy-filter"
+	KeyEnablePolicyFilterCgroupMap = "enable-policy-filter-cgroup-map"
+	KeyEnablePolicyFilterDebug     = "enable-policy-filter-debug"
 
 	KeyEnablePidSetFilter = "enable-pid-set-filter"
 
@@ -117,6 +125,9 @@ const (
 	KeyEventCacheRetryDelay = "event-cache-retry-delay"
 
 	KeyCompatibilitySyscall64SizeType = "enable-compatibility-syscall64-size-type"
+
+	KeyExecveMapEntries = "execve-map-entries"
+	KeyExecveMapSize    = "execve-map-size"
 )
 
 type UsernameMetadaCode int
@@ -144,6 +155,14 @@ func ReadAndSetFlags() error {
 	Config.ForceLargeProgs = viper.GetBool(KeyForceLargeProgs)
 	Config.Debug = viper.GetBool(KeyDebug)
 	Config.ClusterName = viper.GetString(KeyClusterName)
+
+	Config.EnableProcessAncestors = viper.GetBool(KeyEnableProcessAncestors)
+	if Config.EnableProcessAncestors {
+		Config.EnableProcessKprobeAncestors = viper.GetBool(KeyEnableProcessKprobeAncestors)
+		Config.EnableProcessTracepointAncestors = viper.GetBool(KeyEnableProcessTracepointAncestors)
+		Config.EnableProcessUprobeAncestors = viper.GetBool(KeyEnableProcessUprobeAncestors)
+		Config.EnableProcessLsmAncestors = viper.GetBool(KeyEnableProcessLsmAncestors)
+	}
 
 	Config.EnableProcessCred = viper.GetBool(KeyEnableProcessCred)
 	Config.EnableProcessNs = viper.GetBool(KeyEnableProcessNs)
@@ -202,6 +221,7 @@ func ReadAndSetFlags() error {
 
 	Config.ReleasePinned = viper.GetBool(KeyReleasePinnedBPF)
 	Config.EnablePolicyFilter = viper.GetBool(KeyEnablePolicyFilter)
+	Config.EnablePolicyFilterCgroupMap = viper.GetBool(KeyEnablePolicyFilterCgroupMap)
 	Config.EnablePolicyFilterDebug = viper.GetBool(KeyEnablePolicyFilterDebug)
 	Config.EnableMsgHandlingLatency = viper.GetBool(KeyEnableMsgHandlingLatency)
 
@@ -250,6 +270,8 @@ func ReadAndSetFlags() error {
 
 	Config.CompatibilitySyscall64SizeType = viper.GetBool(KeyCompatibilitySyscall64SizeType)
 
+	Config.ExecveMapEntries = viper.GetInt(KeyExecveMapEntries)
+	Config.ExecveMapSize = viper.GetString(KeyExecveMapSize)
 	return nil
 }
 
@@ -331,6 +353,13 @@ func AddFlags(flags *pflag.FlagSet) {
 	flags.Bool(KeyEnableProcessNs, false, "Enable namespace information in process_exec and process_kprobe events")
 	flags.Uint(KeyEventQueueSize, 10000, "Set the size of the internal event queue.")
 
+	// Allow to include ancestor processes in events
+	flags.Bool(KeyEnableProcessAncestors, false, "Include ancestors in process_exec and process_exit events. Disabled by default. Required by other enable ancestors options for correct reference counting")
+	flags.Bool(KeyEnableProcessKprobeAncestors, false, fmt.Sprintf("Include ancestors in process_kprobe events. Only used if '%s' is set to 'true'", KeyEnableProcessAncestors))
+	flags.Bool(KeyEnableProcessTracepointAncestors, false, fmt.Sprintf("Include ancestors in process_tracepoint events. Only used if '%s' is set to 'true'", KeyEnableProcessAncestors))
+	flags.Bool(KeyEnableProcessUprobeAncestors, false, fmt.Sprintf("Include ancestors in process_uprobe events. Only used if '%s' is set to 'true'", KeyEnableProcessAncestors))
+	flags.Bool(KeyEnableProcessLsmAncestors, false, fmt.Sprintf("Include ancestors in process_lsm events. Only used if '%s' is set to 'true'", KeyEnableProcessAncestors))
+
 	// Tracing policy file
 	flags.String(KeyTracingPolicy, "", "Tracing policy file to load at startup")
 
@@ -378,6 +407,7 @@ func AddFlags(flags *pflag.FlagSet) {
 	// Provide option to enable policy filtering. Because the code is new,
 	// this is set to false by default.
 	flags.Bool(KeyEnablePolicyFilter, false, "Enable policy filter code")
+	flags.Bool(KeyEnablePolicyFilterCgroupMap, false, "Enable cgroup mappings for policy filter maps")
 	flags.Bool(KeyEnablePolicyFilterDebug, false, "Enable policy filter debug messages")
 
 	// Provide option to enable the pidSet export filters.
@@ -416,4 +446,7 @@ func AddFlags(flags *pflag.FlagSet) {
 	flags.Int(KeyEventCacheRetryDelay, defaults.DefaultEventCacheRetryDelay, "Delay in seconds between event cache retries")
 
 	flags.Bool(KeyCompatibilitySyscall64SizeType, false, "syscall64 type will produce output of type size (compatibility flag, will be removed in v1.4)")
+
+	flags.Int(KeyExecveMapEntries, 0, "Set entries for execve_map table (default 32768)")
+	flags.String(KeyExecveMapSize, "", "Set size for execve_map table (allows K/M/G suffix)")
 }

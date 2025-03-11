@@ -17,11 +17,37 @@ permissions:
   contents: read
 
 jobs:
+  build-every-commit:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'pull_request' }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      with:
+        ref: ${{ github.event.pull_request.head.sha }}
+        fetch-depth: 0
+
+    - name: Install Go
+      uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
+      with:
+        # renovate: datasource=golang-version depName=go
+        go-version: '1.24.1'
+
+    - name: Check if build works for every commit
+      run: |
+        set -x
+        PR_FIRST_COMMIT=$(git rev-list --reverse origin/${{ github.event.pull_request.base.ref }}..HEAD | head -1)
+        git rebase --exec "make -j$(nproc) tetragon tetra tetragon-bpf tetragon-operator" $PR_FIRST_COMMIT^
+
+    - name: Failed commit during the build
+      if: ${{ failure() }}
+      run: git --no-pager log --format=%B -n 1
+
   ensure-no-binary-checkin:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       
       - name: Ensure No Binary Files Checked In
         run: |
@@ -34,34 +60,34 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Install Go
-        uses: actions/setup-go@0a12ed9d6a96ab950c8f026ed9f722fe0da7ef32 # v5.0.2
+        uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
         with:
           # renovate: datasource=golang-version depName=go
-          go-version: '1.23.4'
+          go-version: '1.24.1'
           # using golangci-lint cache instead
           cache: false
 
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@aaa42aa0628b4ae2578232a66b541047968fac86 # v6.1.0
+        uses: golangci/golangci-lint-action@051d91933864810ecd5e2ea2cfd98f6a5bca5347 # v6.3.2
         with:
           # renovate: datasource=docker depName=docker.io/golangci/golangci-lint
-          version: v1.62.2
+          version: v1.64.6
           args: --config=.golangci.yml --verbose
 
   format:
     runs-on: ubuntu-latest 
     steps:
       - name: Checkout
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Install Go
-        uses: actions/setup-go@0a12ed9d6a96ab950c8f026ed9f722fe0da7ef32 # v5.0.2
+        uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
         with:
           # renovate: datasource=golang-version depName=go
-          go-version: '1.23.4'
+          go-version: '1.24.1'
 
       - name: Check gofmt formatting
         run: |
@@ -74,8 +100,7 @@ jobs:
       - name: Verify clang-format on BPF code
         run: |
           set -o pipefail
-          find bpf -name '*.c' -o -name '*.h' -not -path 'bpf/include/vmlinux.h' \
-            -not -path 'bpf/include/api.h' -not -path 'bpf/libbpf/*' | xargs -n 1000 \
+          find bpf -name '*.c' -o -name '*.h' | xargs -n 1000 \
             docker run -v $(realpath .):/tetragon "isovalent/clang-format:latest" --Werror -n -style=file
           if [ $? != 0 ]; then
             echo "clang-format checks failed. Please run 'make format' and submit your changes."; exit 1
@@ -85,13 +110,13 @@ jobs:
     runs-on: ubuntu-latest 
     steps:
       - name: Checkout
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Install Go
-        uses: actions/setup-go@0a12ed9d6a96ab950c8f026ed9f722fe0da7ef32 # v5.0.2
+        uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
         with:
           # renovate: datasource=golang-version depName=go
-          go-version: '1.23.4'
+          go-version: '1.24.1'
 
       - name: Check module vendoring
         run: |
@@ -103,7 +128,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Build CLI release binaries
         run: make cli-release

@@ -20,6 +20,7 @@ import (
 func TestMain(m *testing.M) {
 	// Needed for cap filters
 	option.Config.EnableProcessCred = true
+	option.Config.EnableProcessAncestors = true
 
 	code := m.Run()
 	os.Exit(code)
@@ -33,7 +34,8 @@ func TestParseFilterList(t *testing.T) {
 {"pid_set":[1]}
 {"event_set":["PROCESS_EXEC", "PROCESS_EXIT", "PROCESS_KPROBE", "PROCESS_TRACEPOINT"]}
 {"arguments_regex":["^--version$","^-a -b -c$"]}
-{"capabilities": {"effective": {"all": ["CAP_BPF", "CAP_SYS_ADMIN"]}}}`
+{"capabilities": {"effective": {"all": ["CAP_BPF", "CAP_SYS_ADMIN"]}}}
+{"cel_expression": ["process_exec.process.bad_field_name == 'curl'"]}`
 	filterProto, err := ParseFilterList(f, true)
 	assert.NoError(t, err)
 	if diff := cmp.Diff(
@@ -50,6 +52,7 @@ func TestParseFilterList(t *testing.T) {
 					All: []tetragon.CapabilitiesType{tetragon.CapabilitiesType_CAP_BPF, tetragon.CapabilitiesType_CAP_SYS_ADMIN},
 				},
 			}},
+			{CelExpression: []string{"process_exec.process.bad_field_name == 'curl'"}},
 		},
 		filterProto,
 		cmpopts.IgnoreUnexported(tetragon.Filter{}),

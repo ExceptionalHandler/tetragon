@@ -22,6 +22,9 @@ const (
 	// DefaultRunDir is the default run directory for runtime
 	DefaultRunDir = `C:\Program Files\Tetragon\`
 
+	// Default Path to where cgroup2 is mounted (Prefix with /run)
+	Cgroup2Dir = ""
+
 	// Default location for BPF programs and BTF files
 	DefaultTetragonLib = `C:\Program Files\Tetragon\BPF`
 

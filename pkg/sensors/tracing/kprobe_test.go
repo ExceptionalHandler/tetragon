@@ -15,7 +15,9 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,9 +29,11 @@ import (
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/asm"
 	"github.com/cilium/tetragon/api/v1/tetragon"
+	"github.com/cilium/tetragon/api/v1/tetragon/codegen/eventchecker"
 	ec "github.com/cilium/tetragon/api/v1/tetragon/codegen/eventchecker"
 	"github.com/cilium/tetragon/pkg/arch"
 	"github.com/cilium/tetragon/pkg/bpf"
+	"github.com/cilium/tetragon/pkg/config"
 	"github.com/cilium/tetragon/pkg/ftrace"
 	"github.com/cilium/tetragon/pkg/grpc/tracing"
 	"github.com/cilium/tetragon/pkg/jsonchecker"
@@ -41,6 +45,7 @@ import (
 	sm "github.com/cilium/tetragon/pkg/matchers/stringmatcher"
 	"github.com/cilium/tetragon/pkg/metrics/consts"
 	"github.com/cilium/tetragon/pkg/metricsconfig"
+	"github.com/cilium/tetragon/pkg/mountinfo"
 	"github.com/cilium/tetragon/pkg/observer"
 	"github.com/cilium/tetragon/pkg/observer/observertesthelper"
 	"github.com/cilium/tetragon/pkg/option"
@@ -120,7 +125,7 @@ spec:
 	if err != nil {
 		t.Fatalf("GetDefaultObserverWithFile error: %s", err)
 	}
-	initialSensor := base.GetInitialSensor()
+	initialSensor := base.GetInitialSensorTest(t)
 	initialSensor.Load(bpf.MapPrefixPath())
 }
 
@@ -567,6 +572,7 @@ spec:
     - index: 2
       type: "size_t"
     returnArg:
+      index: 0
       type: "size_t"
     selectors:
     - matchPIDs:
@@ -1533,6 +1539,7 @@ func testKprobeObjectFilterReturnValueGTHook(pidStr, path string) string {
       - index: 2
         type: "int"
       returnArg:
+        index: 0
         type: int
       selectors:
       - matchPIDs:
@@ -1572,6 +1579,7 @@ func testKprobeObjectFilterReturnValueLTHook(pidStr, path string) string {
       - index: 2
         type: "int"
       returnArg:
+        index: 0
         type: int
       selectors:
       - matchPIDs:
@@ -1623,7 +1631,7 @@ func testKprobeObjectFilteredReturnValue(t *testing.T,
 }
 
 func TestKprobeObjectFilterReturnValueGTOk(t *testing.T) {
-	if !kernels.EnableLargeProgs() {
+	if !config.EnableLargeProgs() {
 		t.Skip("Older kernels do not support GT/LT matching")
 	}
 	pidStr := strconv.Itoa(int(observertesthelper.GetMyPid()))
@@ -1659,7 +1667,7 @@ func TestKprobeObjectFilterReturnValueGTOk(t *testing.T) {
 }
 
 func TestKprobeObjectFilterReturnValueGTFail(t *testing.T) {
-	if !kernels.EnableLargeProgs() {
+	if !config.EnableLargeProgs() {
 		t.Skip("Older kernels do not support GT/LT matching")
 	}
 	pidStr := strconv.Itoa(int(observertesthelper.GetMyPid()))
@@ -1673,7 +1681,7 @@ func TestKprobeObjectFilterReturnValueGTFail(t *testing.T) {
 }
 
 func TestKprobeObjectFilterReturnValueLTOk(t *testing.T) {
-	if !kernels.EnableLargeProgs() {
+	if !config.EnableLargeProgs() {
 		t.Skip("Older kernels do not support GT/LT matching")
 	}
 	pidStr := strconv.Itoa(int(observertesthelper.GetMyPid()))
@@ -1700,7 +1708,7 @@ func TestKprobeObjectFilterReturnValueLTOk(t *testing.T) {
 }
 
 func TestKprobeObjectFilterReturnValueLTFail(t *testing.T) {
-	if !kernels.EnableLargeProgs() {
+	if !config.EnableLargeProgs() {
 		t.Skip("Older kernels do not support GT/LT matching")
 	}
 	pidStr := strconv.Itoa(int(observertesthelper.GetMyPid()))
@@ -1863,6 +1871,7 @@ spec:
     - index: 1
       type: "filename"
     returnArg:
+      index: 0
       type: file
     selectors:
     - matchPIDs:
@@ -2130,7 +2139,7 @@ func testMultiplePathComponentsFiltered(t *testing.T, readHook string) {
 
 	filePath := path + "/testfile"
 	writeChecker := getWriteChecker(t, "/7/8/9/10/11/12/13/14/15/16/testfile", "unresolvedPathComponents")
-	if kernels.EnableLargeProgs() {
+	if config.EnableLargeProgs() {
 		writeChecker = getWriteChecker(t, "/tmp/0/1/2/3/4/5/6/7/8/9/10/11/12/13/14/15/16/testfile", "")
 	}
 
@@ -2194,7 +2203,7 @@ func testMultipleMountPathFiltered(t *testing.T, readHook string) {
 
 	filePath := path + "/testfile"
 	writeChecker := getWriteChecker(t, "/7/8/9/10/11/12/13/14/15/16/testfile", "unresolvedPathComponents")
-	if kernels.EnableLargeProgs() {
+	if config.EnableLargeProgs() {
 		writeChecker = getWriteChecker(t, "/tmp2/tmp3/tmp4/tmp5/0/1/2/3/4/5/6/7/8/9/10/11/12/13/14/15/16/testfile", "")
 	}
 
@@ -2222,7 +2231,7 @@ func TestMultipleMountPath(t *testing.T) {
 func TestMultipleMountPathFiltered(t *testing.T) {
 	pidStr := strconv.Itoa(int(observertesthelper.GetMyPid()))
 	readHook := testKprobeObjectFileWriteFilteredHook(pidStr, "/7/8/9/10/11/12/13/14/15/16")
-	if kernels.EnableLargeProgs() {
+	if config.EnableLargeProgs() {
 		readHook = testKprobeObjectFileWriteFilteredHook(pidStr, "/tmp2/tmp3/tmp4/tmp5/0/1/2/3/4/5/6/7/8/9/10/11/12/13/14/15/16")
 	}
 	testMultipleMountPathFiltered(t, readHook)
@@ -2398,6 +2407,7 @@ spec:
     - index: 2
       type: "int"
     returnArg:
+      index: 0
       type: "int"
     selectors:
     - matchPIDs:
@@ -2461,6 +2471,7 @@ spec:
     - index: 0
       type: "file"
     returnArg:
+      index: 0
       type: "int"
     selectors:
     - matchPIDs:
@@ -2519,6 +2530,7 @@ spec:
     - index: 2
       type: "int"
     returnArg:
+      index: 0
       type: "int"
     selectors:
     - matchPIDs:
@@ -2610,7 +2622,7 @@ func runKprobeOverrideSignal(t *testing.T, hook string, checker ec.MultiEventChe
 }
 
 func TestKprobeOverrideSignal(t *testing.T) {
-	if !kernels.EnableLargeProgs() {
+	if !config.EnableLargeProgs() {
 		t.Skip()
 	}
 	pidStr := strconv.Itoa(int(observertesthelper.GetMyPid()))
@@ -2639,6 +2651,7 @@ spec:
     - index: 2
       type: "int"
     returnArg:
+      index: 0
       type: "int"
     selectors:
     - matchPIDs:
@@ -2675,7 +2688,7 @@ spec:
 }
 
 func TestKprobeSignalOverride(t *testing.T) {
-	if !kernels.EnableLargeProgs() {
+	if !config.EnableLargeProgs() {
 		t.Skip()
 	}
 	pidStr := strconv.Itoa(int(observertesthelper.GetMyPid()))
@@ -2704,6 +2717,7 @@ spec:
     - index: 2
       type: "int"
     returnArg:
+      index: 0
       type: "int"
     selectors:
     - matchPIDs:
@@ -2740,7 +2754,7 @@ spec:
 }
 
 func TestKprobeSignalOverrideNopost(t *testing.T) {
-	if !kernels.EnableLargeProgs() {
+	if !config.EnableLargeProgs() {
 		t.Skip()
 	}
 	pidStr := strconv.Itoa(int(observertesthelper.GetMyPid()))
@@ -2769,6 +2783,7 @@ spec:
     - index: 2
       type: "int"
     returnArg:
+      index: 0
       type: "int"
     selectors:
     - matchPIDs:
@@ -2865,7 +2880,7 @@ func runKprobeOverrideMulti(t *testing.T, hook string, checker ec.MultiEventChec
 }
 
 func TestKprobeOverrideMulti(t *testing.T) {
-	if !kernels.EnableLargeProgs() {
+	if !config.EnableLargeProgs() {
 		t.Skip()
 	}
 
@@ -2912,6 +2927,7 @@ spec:
     - index: 2
       type: "int"
     returnArg:
+      index: 0
       type: "int"
     selectors:
     - matchPIDs:
@@ -2942,6 +2958,7 @@ spec:
     - index: 4
       type: "int"
     returnArg:
+      index: 0
       type: "int"
     selectors:
     - matchPIDs:
@@ -3072,7 +3089,7 @@ func runKprobe_char_iovec(t *testing.T, configHook string,
 		t.Fatalf("writeFile(%s): err %s", testConfigFile, err)
 	}
 
-	b := base.GetInitialSensor()
+	b := base.GetInitialSensorTest(t)
 	obs, err := observertesthelper.GetDefaultObserverWithWatchers(t, ctx, b, observertesthelper.WithConfig(testConfigFile), observertesthelper.WithLib(tus.Conf().TetragonLib), observertesthelper.WithMyPid())
 	if err != nil {
 		t.Fatalf("GetDefaultObserverWithWatchers error: %s", err)
@@ -3423,7 +3440,7 @@ func createCrdFile(t *testing.T, readHook string) {
 }
 
 func getNumValues() int {
-	if kernels.EnableLargeProgs() {
+	if config.EnableLargeProgs() {
 		return 4
 	}
 	return 2
@@ -3440,7 +3457,7 @@ func TestKprobeMatchArgsFileEqual(t *testing.T) {
 	argVals := make([]string, numValues)
 	argVals[0] = "/etc/passwd"
 	argVals[1] = "/etc/group"
-	if kernels.EnableLargeProgs() {
+	if config.EnableLargeProgs() {
 		argVals[2] = "/etc/hostname"
 		argVals[3] = "/etc/shadow"
 	}
@@ -3480,7 +3497,7 @@ func TestKprobeMatchArgsFilePostfix(t *testing.T) {
 	argVals := make([]string, numValues)
 	argVals[0] = "passwd"
 	argVals[1] = "group"
-	if kernels.EnableLargeProgs() {
+	if config.EnableLargeProgs() {
 		argVals[2] = "hostname"
 		argVals[3] = "shadow"
 	}
@@ -3520,7 +3537,7 @@ func TestKprobeMatchArgsFilePrefix(t *testing.T) {
 	argVals := make([]string, numValues)
 	argVals[0] = "/etc/p"
 	argVals[1] = "/etc/g"
-	if kernels.EnableLargeProgs() {
+	if config.EnableLargeProgs() {
 		argVals[2] = "/etc/h"
 		argVals[3] = "/etc/s"
 	}
@@ -3560,7 +3577,7 @@ func TestKprobeMatchArgsFdEqual(t *testing.T) {
 	argVals := make([]string, numValues)
 	argVals[0] = "/etc/passwd"
 	argVals[1] = "/etc/group"
-	if kernels.EnableLargeProgs() {
+	if config.EnableLargeProgs() {
 		argVals[2] = "/etc/hostname"
 		argVals[3] = "/etc/shadow"
 	}
@@ -3596,7 +3613,7 @@ func TestKprobeMatchArgsFdPostfix(t *testing.T) {
 	argVals := make([]string, numValues)
 	argVals[0] = "passwd"
 	argVals[1] = "group"
-	if kernels.EnableLargeProgs() {
+	if config.EnableLargeProgs() {
 		argVals[2] = "hostname"
 		argVals[3] = "shadow"
 	}
@@ -3632,7 +3649,7 @@ func TestKprobeMatchArgsFdPrefix(t *testing.T) {
 	argVals := make([]string, numValues)
 	argVals[0] = "/etc/p"
 	argVals[1] = "/etc/g"
-	if kernels.EnableLargeProgs() {
+	if config.EnableLargeProgs() {
 		argVals[2] = "/etc/h"
 		argVals[3] = "/etc/s"
 	}
@@ -3718,7 +3735,7 @@ func TestKprobeMatchArgsFileMonitoringPrefix(t *testing.T) {
 }
 
 func TestKprobeMatchArgsNonPrefix(t *testing.T) {
-	if !kernels.EnableLargeProgs() {
+	if !config.EnableLargeProgs() {
 		t.Skip()
 	}
 
@@ -3880,25 +3897,25 @@ func TestKprobeMatchBinaries(t *testing.T) {
 		matchBinariesTest(t, "NotIn", []string{"/usr/bin/tail"}, createBinariesChecker("/usr/bin/head", "/etc/passwd"))
 	})
 	t.Run("Prefix", func(t *testing.T) {
-		if !kernels.EnableLargeProgs() {
+		if !config.EnableLargeProgs() {
 			t.Skip(skipMatchBinaries)
 		}
 		matchBinariesTest(t, "Prefix", []string{"/usr/bin/t"}, createBinariesChecker("/usr/bin/tail", "/etc/passwd"))
 	})
 	t.Run("NotPrefix", func(t *testing.T) {
-		if !kernels.EnableLargeProgs() {
+		if !config.EnableLargeProgs() {
 			t.Skip(skipMatchBinaries)
 		}
 		matchBinariesTest(t, "NotPrefix", []string{"/usr/bin/t"}, createBinariesChecker("/usr/bin/head", "/etc/passwd"))
 	})
 	t.Run("Postfix", func(t *testing.T) {
-		if !kernels.EnableLargeProgs() {
+		if !config.EnableLargeProgs() {
 			t.Skip(skipMatchBinaries)
 		}
 		matchBinariesTest(t, "Postfix", []string{"bin/tail"}, createBinariesChecker("/usr/bin/tail", "/etc/passwd"))
 	})
 	t.Run("NotPostfix", func(t *testing.T) {
-		if !kernels.EnableLargeProgs() {
+		if !config.EnableLargeProgs() {
 			t.Skip(skipMatchBinaries)
 		}
 		matchBinariesTest(t, "NotPostfix", []string{"bin/tail"}, createBinariesChecker("/usr/bin/head", "/etc/passwd"))
@@ -3934,7 +3951,7 @@ func matchBinariesLargePathTest(t *testing.T, operator string, values []string, 
 
 }
 func TestKprobeMatchBinariesLargePath(t *testing.T) {
-	if !kernels.EnableLargeProgs() {
+	if !config.EnableLargeProgs() {
 		t.Skip()
 	}
 
@@ -4052,13 +4069,13 @@ func TestKprobeMatchBinariesPerfring(t *testing.T) {
 		matchBinariesPerfringTest(t, "In", []string{"/usr/bin/tail"})
 	})
 	t.Run("Prefix", func(t *testing.T) {
-		if !kernels.EnableLargeProgs() {
+		if !config.EnableLargeProgs() {
 			t.Skip(skipMatchBinaries)
 		}
 		matchBinariesPerfringTest(t, "Prefix", []string{"/usr/bin/t"})
 	})
 	t.Run("Postfix", func(t *testing.T) {
-		if !kernels.EnableLargeProgs() {
+		if !config.EnableLargeProgs() {
 			t.Skip(skipMatchBinaries)
 		}
 		matchBinariesPerfringTest(t, "Postfix", []string{"tail"})
@@ -4144,7 +4161,7 @@ func TestKprobeMatchBinariesEarlyExec(t *testing.T) {
 // matchBinaries works well with the prefix of matchArgs since its reusing some
 // of its machinery.
 func TestKprobeMatchBinariesPrefixMatchArgs(t *testing.T) {
-	if !kernels.EnableLargeProgs() {
+	if !config.EnableLargeProgs() {
 		t.Skip(skipMatchBinaries)
 	}
 
@@ -4372,7 +4389,7 @@ func TestLoadKprobeSensor(t *testing.T) {
 		tus.SensorMap{Name: "tg_conf_map", Progs: []uint{0}},
 	}
 
-	if kernels.EnableLargeProgs() {
+	if config.EnableLargeProgs() {
 		// shared with base sensor
 		sensorMaps = append(sensorMaps, tus.SensorMap{Name: "execve_map", Progs: []uint{4, 5, 6, 7, 9}})
 
@@ -4408,6 +4425,7 @@ spec:
     - index: 2
       type: "size_t"
     returnArg:
+      index: 0
       type: "size_t"
 `
 
@@ -4746,7 +4764,7 @@ spec:
         - "9919"
 `
 
-	if kernels.EnableLargeProgs() {
+	if config.EnableLargeProgs() {
 		createCrdFile(t, hookFull)
 	} else {
 		createCrdFile(t, hookPart)
@@ -4835,7 +4853,7 @@ spec:
         - "9918"
 `
 
-	if kernels.EnableLargeProgs() {
+	if config.EnableLargeProgs() {
 		createCrdFile(t, hookFull)
 	} else {
 		createCrdFile(t, hookPart)
@@ -4928,7 +4946,7 @@ spec:
         - "9925"
 `
 
-	if kernels.EnableLargeProgs() {
+	if config.EnableLargeProgs() {
 		createCrdFile(t, hookFull)
 	} else {
 		createCrdFile(t, hookPart)
@@ -5017,7 +5035,7 @@ spec:
         - "9910:9920"
 `
 
-	if kernels.EnableLargeProgs() {
+	if config.EnableLargeProgs() {
 		createCrdFile(t, hookFull)
 	} else {
 		createCrdFile(t, hookPart)
@@ -5102,7 +5120,7 @@ spec:
         operator: "DPortPriv"
 `
 
-	if kernels.EnableLargeProgs() {
+	if config.EnableLargeProgs() {
 		createCrdFile(t, hookFull)
 	} else {
 		createCrdFile(t, hookPart)
@@ -5187,7 +5205,7 @@ spec:
         operator: "NotDPortPriv"
 `
 
-	if kernels.EnableLargeProgs() {
+	if config.EnableLargeProgs() {
 		createCrdFile(t, hookFull)
 	} else {
 		createCrdFile(t, hookPart)
@@ -5276,7 +5294,7 @@ spec:
         - "10.0.0.0/8"
 `
 
-	if kernels.EnableLargeProgs() {
+	if config.EnableLargeProgs() {
 		createCrdFile(t, hookFull)
 	} else {
 		createCrdFile(t, hookPart)
@@ -5369,7 +5387,7 @@ spec:
         - "172.16.0.0/16"
 `
 
-	if kernels.EnableLargeProgs() {
+	if config.EnableLargeProgs() {
 		createCrdFile(t, hookFull)
 	} else {
 		createCrdFile(t, hookPart)
@@ -5469,7 +5487,7 @@ spec:
         - "TCP_SYN_RECV"
 `
 
-	if kernels.EnableLargeProgs() {
+	if config.EnableLargeProgs() {
 		createCrdFile(t, hookFull)
 	} else {
 		createCrdFile(t, hookPart)
@@ -5563,7 +5581,7 @@ spec:
         - "AF_INET"
 `
 
-	if kernels.EnableLargeProgs() {
+	if config.EnableLargeProgs() {
 		createCrdFile(t, hookFull)
 	} else {
 		createCrdFile(t, hookPart)
@@ -5592,6 +5610,106 @@ spec:
 					WithDaddr(sm.Full("127.0.0.1")).
 					WithDport(9919).
 					WithFamily(sm.Full("AF_INET")),
+				),
+			))
+
+	checker := ec.NewUnorderedEventChecker(kpChecker)
+
+	err = jsonchecker.JsonTestCheck(t, checker)
+	assert.NoError(t, err)
+}
+
+func TestKprobeSocketAndSockaddr(t *testing.T) {
+	var doneWG, readyWG sync.WaitGroup
+	defer doneWG.Wait()
+
+	ctx, cancel := context.WithTimeout(context.Background(), tus.Conf().CmdWaitTime)
+	defer cancel()
+
+	hookFull := `apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: "security-socket-connect"
+spec:
+  kprobes:
+  - call: "security_socket_connect"
+    syscall: false
+    args:
+    - index: 0
+      type: "socket"
+    - index: 1
+      type: "sockaddr"
+    selectors:
+    - matchArgs:
+      - index: 0
+        operator: "Protocol"
+        values:
+        - "IPPROTO_TCP"
+      - index: 1
+        operator: "SAddr"
+        values:
+        - "127.0.0.1"
+      - index: 1
+        operator: "SPort"
+        values:
+        - "9919"
+      - index: 1
+        operator: "Family"
+        values:
+        - "AF_INET"
+`
+	hookPart := `apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: "security-socket-connect"
+spec:
+  kprobes:
+  - call: "security_socket_connect"
+    syscall: false
+    args:
+    - index: 0
+      type: "socket"
+    - index: 1
+      type: "sockaddr"
+    selectors:
+    - matchArgs:
+      - index: 0
+        operator: "Protocol"
+        values:
+        - "IPPROTO_TCP"
+`
+
+	if config.EnableLargeProgs() {
+		createCrdFile(t, hookFull)
+	} else {
+		createCrdFile(t, hookPart)
+	}
+
+	obs, err := observertesthelper.GetDefaultObserverWithFile(t, ctx, testConfigFile, tus.Conf().TetragonLib)
+	if err != nil {
+		t.Fatalf("GetDefaultObserverWithFile error: %s", err)
+	}
+	observertesthelper.LoopEvents(ctx, t, &doneWG, &readyWG, obs)
+	readyWG.Wait()
+
+	tcpReady := make(chan bool)
+	go miniTcpNopServer(tcpReady)
+	<-tcpReady
+	addr, err := net.ResolveTCPAddr("tcp", "127.0.0.1:9919")
+	assert.NoError(t, err)
+	_, err = net.DialTCP("tcp", nil, addr)
+	assert.NoError(t, err)
+
+	kpChecker := ec.NewProcessKprobeChecker("security-socket-connect-checker").
+		WithFunctionName(sm.Full("security_socket_connect")).
+		WithArgs(ec.NewKprobeArgumentListMatcher().
+			WithValues(
+				ec.NewKprobeArgumentChecker().WithSockaddrArg(ec.NewKprobeSockaddrChecker().
+					WithAddr(sm.Full("127.0.0.1")).
+					WithPort(9919).
+					WithFamily(sm.Full("AF_INET"))),
+				ec.NewKprobeArgumentChecker().WithSockArg(ec.NewKprobeSockChecker().
+					WithProtocol(sm.Full("IPPROTO_TCP")),
 				),
 			))
 
@@ -5655,7 +5773,7 @@ spec:
         - "53"
 `
 
-	if kernels.EnableLargeProgs() {
+	if config.EnableLargeProgs() {
 		createCrdFile(t, hookFull)
 	} else {
 		createCrdFile(t, hookPart)
@@ -5748,7 +5866,7 @@ spec:
         - "::1"
 `
 
-	if kernels.EnableLargeProgs() {
+	if config.EnableLargeProgs() {
 		createCrdFile(t, hookFull)
 	} else {
 		createCrdFile(t, hookPart)
@@ -5839,7 +5957,7 @@ spec:
         - "::1"
 `
 
-	if kernels.EnableLargeProgs() {
+	if config.EnableLargeProgs() {
 		createCrdFile(t, hookFull)
 	} else {
 		createCrdFile(t, hookPart)
@@ -5983,7 +6101,7 @@ spec:
 }
 
 func TestKprobeNoRateLimit(t *testing.T) {
-	if !kernels.EnableLargeProgs() {
+	if !config.EnableLargeProgs() {
 		t.Skip("Test requires kernel 5.4")
 	}
 
@@ -5991,7 +6109,7 @@ func TestKprobeNoRateLimit(t *testing.T) {
 }
 
 func TestKprobeRateLimit(t *testing.T) {
-	if !kernels.EnableLargeProgs() {
+	if !config.EnableLargeProgs() {
 		t.Skip("Test requires kernel 5.4")
 	}
 
@@ -6083,7 +6201,7 @@ spec:
 }
 
 func TestLinuxBinprmExtractPath(t *testing.T) {
-	if !kernels.EnableLargeProgs() {
+	if !config.EnableLargeProgs() {
 		t.Skip("Older kernels do not support matchArgs with linux_binprm")
 	}
 	testutils.CaptureLog(t, logger.GetLogger().(*logrus.Logger))
@@ -6467,7 +6585,7 @@ spec:
 }
 
 func TestKprobeMultiMatcArgs(t *testing.T) {
-	if !kernels.EnableLargeProgs() {
+	if !config.EnableLargeProgs() {
 		t.Skip("Older kernels do not support matchArgs for more than one arguments")
 	}
 
@@ -7096,6 +7214,237 @@ spec:
 		WithTags(ec.NewStringListMatcher().WithValues(sm.Full("prctl_9999")))
 
 	checker := ec.NewUnorderedEventChecker(kp_8888, kp_9999)
+
+	err = jsonchecker.JsonTestCheck(t, checker)
+	assert.NoError(t, err)
+}
+
+// TestLongPath could be split into a test checking for long args from kprobe
+// events and a test checking for long cwd
+func TestLongPath(t *testing.T) {
+	var doneWG, readyWG sync.WaitGroup
+	defer doneWG.Wait()
+
+	ctx, cancel := context.WithTimeout(context.Background(), tus.Conf().CmdWaitTime)
+	defer cancel()
+
+	// depending on temp dir, this should generate a path of ~1500 chars
+	// we can increase this to reach ~4000 for kernel supporting more than 11 dentry walk
+	longDirectory := strings.Repeat("a", 255)
+	longPathSlices := slices.Repeat([]string{longDirectory}, 6)
+	longPath := path.Join(t.TempDir(), path.Join(longPathSlices...))
+
+	// create a long temporary directory structure
+	err := os.MkdirAll(longPath, 0644)
+	require.NoError(t, err)
+	longPathWithFile := path.Join(longPath, "file")
+	file, err := os.Create(longPathWithFile)
+	require.NoError(t, err)
+	file.Close()
+
+	fdinstallHook := `apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: "fdinstall"
+spec:
+  kprobes:
+  - call: "fd_install"
+    syscall: false
+    args:
+    - index: 1
+      type: "file"`
+
+	createCrdFile(t, fdinstallHook)
+
+	kprobeLongFileArgChecker := ec.NewProcessKprobeChecker("longFile").
+		WithFunctionName(sm.Full("fd_install")).
+		WithArgs(ec.NewKprobeArgumentListMatcher().WithValues(
+			ec.NewKprobeArgumentChecker().WithFileArg(ec.NewKprobeFileChecker().WithPath(sm.Full(longPathWithFile))),
+		))
+
+	processLongCWDChecker := ec.NewProcessExecChecker("longCWD").
+		WithProcess(ec.NewProcessChecker().WithBinary(sm.Suffix("ls")).WithCwd(sm.Full(longPath)))
+
+	obs, err := observertesthelper.GetDefaultObserverWithFile(t, ctx, testConfigFile, tus.Conf().TetragonLib, observertesthelper.WithMyPid())
+	if err != nil {
+		t.Fatalf("GetDefaultObserverWithFile error: %s", err)
+	}
+	observertesthelper.LoopEvents(ctx, t, &doneWG, &readyWG, obs)
+	readyWG.Wait()
+
+	// generate an event by opening the file
+	file, err = os.Open(longPathWithFile)
+	require.NoError(t, err)
+	file.Close()
+
+	// generate an event by exec with cwd
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+
+	err = os.Chdir(longPath)
+	require.NoError(t, err)
+
+	cmd := exec.Command("ls")
+	err = cmd.Run()
+	require.NoError(t, err)
+
+	err = os.Chdir(cwd)
+	require.NoError(t, err)
+
+	checker := ec.NewUnorderedEventChecker(kprobeLongFileArgChecker, processLongCWDChecker)
+	err = jsonchecker.JsonTestCheck(t, checker)
+	assert.NoError(t, err)
+}
+
+func TestKprobeDentryPath(t *testing.T) {
+	var doneWG, readyWG sync.WaitGroup
+	defer doneWG.Wait()
+
+	// In this test we create 2 files dentry-unlink-[12] and load config
+	// spec to watch unlink of one of them dentry-unlink-1.
+	// The we make sure we get proper expected path value in the event
+	// and that there's no event for dentry-unlink-2 file removal.
+
+	file_1, err := os.CreateTemp(t.TempDir(), "dentry-unlink-1")
+	if err != nil {
+		t.Fatalf("writeFile(%s): err %s", testConfigFile, err)
+	}
+	defer assert.NoError(t, file_1.Close())
+
+	file_2, err := os.CreateTemp(t.TempDir(), "dentry-unlink-2")
+	if err != nil {
+		t.Fatalf("writeFile(%s): err %s", testConfigFile, err)
+	}
+	defer assert.NoError(t, file_2.Close())
+
+	ctx, cancel := context.WithTimeout(context.Background(), tus.Conf().CmdWaitTime)
+	defer cancel()
+
+	infos, err := mountinfo.GetMountInfo()
+	if err != nil {
+		t.Fatalf("mountinfo.GetMountInfo() err %s", err)
+	}
+
+	// We can extract dentry type until first mount point,
+	// so let's detect that and find final path portion for
+	// checking.
+	check_1 := file_1.Name()
+	check_2 := file_2.Name()
+	for _, info := range infos {
+		if len(info.MountPoint) > 1 && strings.HasPrefix(file_1.Name(), info.MountPoint) {
+			check_1 = check_1[len(info.MountPoint):]
+			check_2 = check_2[len(info.MountPoint):]
+			break
+		}
+	}
+
+	hook := `apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: "multiple-symbols"
+spec:
+  kprobes:
+  - call: "security_path_unlink"
+    syscall: false
+    args:
+    - index: 1
+      type: "dentry"
+    selectors:
+    - matchArgs:
+      - index: 1
+        operator: "Postfix"
+        values:
+        - "` + check_1 + `"
+`
+	createCrdFile(t, hook)
+
+	t.Logf("Removing file 1 %s, check %s\n", file_1.Name(), check_1)
+	t.Logf("Removing file 2 %s, check %s\n", file_2.Name(), check_2)
+
+	obs, err := observertesthelper.GetDefaultObserverWithFile(t, ctx, testConfigFile, tus.Conf().TetragonLib)
+	if err != nil {
+		t.Fatalf("GetDefaultObserverWithFile error: %s", err)
+	}
+	observertesthelper.LoopEvents(ctx, t, &doneWG, &readyWG, obs)
+	readyWG.Wait()
+
+	syscall.Unlink(file_1.Name())
+	syscall.Unlink(file_2.Name())
+
+	getChecker := func(check string) *eventchecker.UnorderedEventChecker {
+		kpChecker := ec.NewProcessKprobeChecker("").
+			WithFunctionName(sm.Full("security_path_unlink")).
+			WithArgs(ec.NewKprobeArgumentListMatcher().
+				WithOperator(lc.Ordered).
+				WithValues(
+					ec.NewKprobeArgumentChecker().WithPathArg(ec.NewKprobePathChecker().
+						WithPath(sm.Full(check)),
+					),
+				)).
+			WithProcess(ec.NewProcessChecker().
+				WithBinary(sm.Suffix(tus.Conf().SelfBinary)))
+
+		return ec.NewUnorderedEventChecker(kpChecker)
+	}
+
+	// We filter for file_1 (check_1) so we should get event for that
+	err = jsonchecker.JsonTestCheck(t, getChecker(check_1))
+	assert.NoError(t, err)
+
+	// ... but not for file_2 (check_2).
+	err = jsonchecker.JsonTestCheck(t, getChecker(check_2))
+	assert.Error(t, err)
+}
+
+func TestKprobeResolvePid(t *testing.T) {
+	if !kernels.MinKernelVersion("5.4") {
+		t.Skip("Test requires kernel 5.4+")
+	}
+
+	var doneWG, readyWG sync.WaitGroup
+	defer doneWG.Wait()
+
+	ctx, cancel := context.WithTimeout(context.Background(), tus.Conf().CmdWaitTime)
+	defer cancel()
+
+	hook := `apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: "resolve-parent-comm"
+spec:
+  kprobes:
+  - call: "security_task_getscheduler"
+    syscall: false
+    args:
+    - index: 0
+      type: "int"
+      resolve: "mm.owner.pid"
+`
+
+	createCrdFile(t, hook)
+
+	obs, err := observertesthelper.GetDefaultObserverWithFile(t, ctx, testConfigFile, tus.Conf().TetragonLib)
+	if err != nil {
+		t.Fatalf("GetDefaultObserverWithFile error: %s", err)
+	}
+	observertesthelper.LoopEvents(ctx, t, &doneWG, &readyWG, obs)
+	readyWG.Wait()
+
+	_ = unix.SchedGetaffinity(0, nil)
+
+	pid := os.Getpid()
+
+	kpChecker := ec.NewProcessKprobeChecker("").
+		WithFunctionName(sm.Full("security_task_getscheduler")).
+		WithArgs(ec.NewKprobeArgumentListMatcher().
+			WithOperator(lc.Ordered).
+			WithValues(
+				ec.NewKprobeArgumentChecker().WithIntArg(int32(pid)),
+			)).
+		WithProcess(ec.NewProcessChecker().
+			WithBinary(sm.Suffix(tus.Conf().SelfBinary)))
+
+	checker := ec.NewUnorderedEventChecker(kpChecker)
 
 	err = jsonchecker.JsonTestCheck(t, checker)
 	assert.NoError(t, err)

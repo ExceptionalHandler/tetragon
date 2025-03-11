@@ -7,6 +7,7 @@
 #include "bpf_event.h"
 #include "bpf_helpers.h"
 #include "bpf_cred.h"
+#include "bpf_d_path.h"
 #include "../process/string_maps.h"
 
 /* Applying 'packed' attribute to structs causes clang to write to the
@@ -93,7 +94,7 @@
  *
  * Phew all clear now?
  */
-#define CWD_MAX	     256
+#define CWD_MAX	     4096
 #define BUFFER	     1024
 #define SIZEOF_EVENT 56
 #define PADDED_BUFFER \
@@ -366,22 +367,24 @@ struct {
 
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
-	__uint(max_entries, 32768);
+	__uint(max_entries, 1);
 	__type(key, __u32);
 	__type(value, struct execve_map_value);
 } execve_map SEC(".maps");
 
+enum {
+	MAP_STATS_COUNT = 0,
+	MAP_STATS_EUPDATE = 1,
+	MAP_STATS_EDELETE = 2,
+	MAP_STATS_MAX = 3,
+};
+
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-	__uint(max_entries, 2);
+	__uint(max_entries, MAP_STATS_MAX);
 	__type(key, __s32);
 	__type(value, __s64);
 } execve_map_stats SEC(".maps");
-
-enum {
-	MAP_STATS_COUNT = 0,
-	MAP_STATS_ERROR = 1,
-};
 
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
@@ -434,7 +437,7 @@ struct {
  */
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-	__uint(max_entries, 2);
+	__uint(max_entries, MAP_STATS_MAX);
 	__type(key, __s32);
 	__type(value, __s64);
 } tg_execve_joined_info_map_stats SEC(".maps");
@@ -460,16 +463,17 @@ FUNC_INLINE int64_t validate_msg_execve_size(int64_t size)
 	return size;
 }
 
-// execve_map_error() will increment the map error counter
-FUNC_INLINE void execve_map_error(void)
+FUNC_INLINE void stats_update(struct bpf_map_def *map, __u32 key, int inc)
 {
-	int one = MAP_STATS_ERROR;
 	__s64 *cntr;
 
-	cntr = map_lookup_elem(&execve_map_stats, &one);
+	cntr = map_lookup_elem(map, &key);
 	if (cntr)
-		*cntr = *cntr + 1;
+		*cntr = *cntr + inc;
 }
+
+#define STATS_INC(map, key) stats_update((struct bpf_map_def *)&(map), MAP_STATS_##key, 1)
+#define STATS_DEC(map, key) stats_update((struct bpf_map_def *)&(map), MAP_STATS_##key, -1)
 
 // execve_map_get will look up if pid exists and return it if it does. If it
 // does not, it will create a new one and return it.
@@ -481,7 +485,6 @@ FUNC_INLINE struct execve_map_value *execve_map_get(__u32 pid)
 	if (!event) {
 		struct execve_map_value *value;
 		int err, zero = MAP_STATS_COUNT;
-		__s64 *cntr;
 
 		value = map_lookup_elem(&execve_val, &zero);
 		if (!value)
@@ -490,11 +493,9 @@ FUNC_INLINE struct execve_map_value *execve_map_get(__u32 pid)
 		memset(value, 0, sizeof(struct execve_map_value));
 		err = map_update_elem(&execve_map, &pid, value, 0);
 		if (!err) {
-			cntr = map_lookup_elem(&execve_map_stats, &zero);
-			if (cntr)
-				*cntr = *cntr + 1;
+			STATS_INC(execve_map_stats, COUNT);
 		} else {
-			execve_map_error();
+			STATS_INC(execve_map_stats, EUPDATE);
 		}
 		event = map_lookup_elem(&execve_map, &pid);
 	}
@@ -509,61 +510,41 @@ FUNC_INLINE struct execve_map_value *execve_map_get_noinit(__u32 pid)
 FUNC_INLINE void execve_map_delete(__u32 pid)
 {
 	int err = map_delete_elem(&execve_map, &pid);
-	int zero = MAP_STATS_COUNT;
-	__s64 *cntr;
 
 	if (!err) {
-		cntr = map_lookup_elem(&execve_map_stats, &zero);
-		if (cntr)
-			*cntr = *cntr - 1;
+		STATS_DEC(execve_map_stats, COUNT);
 	} else {
-		execve_map_error();
+		STATS_INC(execve_map_stats, EDELETE);
 	}
-}
-
-// execve_joined_info_map_error() will increment the map error counter
-FUNC_INLINE void execve_joined_info_map_error(void)
-{
-	int one = MAP_STATS_ERROR;
-	__s64 *cntr;
-
-	cntr = map_lookup_elem(&tg_execve_joined_info_map_stats, &one);
-	if (cntr)
-		*cntr = *cntr + 1;
 }
 
 FUNC_INLINE void execve_joined_info_map_set(__u64 tid, struct execve_info *info)
 {
-	int err, zero = MAP_STATS_COUNT;
-	__s64 *cntr;
+	int err;
 
 	err = map_update_elem(&tg_execve_joined_info_map, &tid, info, BPF_ANY);
-	if (err < 0) {
+	if (!err) {
+		STATS_INC(tg_execve_joined_info_map_stats, COUNT);
+	} else {
 		/* -EBUSY or -ENOMEM with the help of the cntr error
 		 * on the stats map this can be a good indication of
 		 * long running workloads and if we have to make the
 		 * map size bigger for such cases.
 		 */
-		execve_joined_info_map_error();
-		return;
+		STATS_INC(tg_execve_joined_info_map_stats, EUPDATE);
 	}
-
-	cntr = map_lookup_elem(&tg_execve_joined_info_map_stats, &zero);
-	if (cntr)
-		*cntr = *cntr + 1;
 }
 
 /* Clear up some space for next threads */
 FUNC_INLINE void execve_joined_info_map_clear(__u64 tid)
 {
-	int err, zero = MAP_STATS_COUNT;
-	__s64 *cntr;
+	int err;
 
 	err = map_delete_elem(&tg_execve_joined_info_map, &tid);
 	if (!err) {
-		cntr = map_lookup_elem(&tg_execve_joined_info_map_stats, &zero);
-		if (cntr)
-			*cntr = *cntr - 1;
+		STATS_DEC(tg_execve_joined_info_map_stats, COUNT);
+	} else {
+		STATS_INC(tg_execve_joined_info_map_stats, EDELETE);
 	}
 	/* We don't care here about -ENOENT as there is no guarantee entries
 	 * will be present anyway.
@@ -640,4 +621,48 @@ perf_event_output_metric(void *ctx, u8 msg_op, void *map, u64 flags, void *data,
 		perf_event_output_update_error_metric(msg_op, err);
 }
 
+/**
+ * read_exe() Reads the path from the backing executable file of the current
+ * process.
+ *
+ * The executable file of a process can change using the prctl() system call
+ * and PR_SET_MM_EXE_FILE. Thus, this function should only be used under the
+ * execve path since the executable file is locked and usually there is only
+ * one remaining thread at its exit path.
+ */
+#ifdef __LARGE_BPF_PROG
+FUNC_INLINE __u32
+read_exe(struct task_struct *task, struct heap_exe *exe)
+{
+	struct file *file = BPF_CORE_READ(task, mm, exe_file);
+	struct path *path = __builtin_preserve_access_index(&file->f_path);
+	__u64 offset = 0;
+	__u64 revlen = STRING_POSTFIX_MAX_LENGTH - 1;
+
+	// we need to walk the complete 4096 len dentry in order to have an accurate
+	// matching on the prefix operators, even if we only keep a subset of that
+	char *buffer;
+
+	buffer = d_path_local(path, (int *)&exe->len, (int *)&exe->error);
+	if (!buffer)
+		return 0;
+
+	if (exe->len > STRING_POSTFIX_MAX_LENGTH - 1)
+		offset = exe->len - (STRING_POSTFIX_MAX_LENGTH - 1);
+	else
+		revlen = exe->len;
+	// buffer used by d_path_local can contain up to MAX_BUF_LEN i.e. 4096 we
+	// only keep the first 255 chars for our needs (we sacrifice one char to the
+	// verifier for the > 0 check)
+	if (exe->len > BINARY_PATH_MAX_LEN - 1)
+		exe->len = BINARY_PATH_MAX_LEN - 1;
+	asm volatile("%[len] &= 0xff;\n"
+		     : [len] "+r"(exe->len));
+	probe_read(exe->buf, exe->len, buffer);
+	if (revlen < STRING_POSTFIX_MAX_LENGTH)
+		probe_read(exe->end, revlen, (char *)(buffer + offset));
+
+	return exe->len;
+}
+#endif
 #endif //_PROCESS__

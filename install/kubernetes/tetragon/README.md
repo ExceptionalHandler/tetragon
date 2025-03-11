@@ -28,14 +28,14 @@ Helm chart for Tetragon
 | podLabelsOverride | object | `{}` |  |
 | podSecurityContext | object | `{}` |  |
 | priorityClassName | string | `""` |  |
-| rthooks | object | `{"annotations":{},"enabled":false,"extraHookArgs":{},"extraLabels":{},"extraVolumeMounts":[],"failAllowNamespaces":"","image":{"override":null,"repository":"quay.io/cilium/tetragon-rthooks","tag":"v0.4"},"installDir":"/opt/tetragon","interface":"","nriHook":{"nriSocket":"/var/run/nri/nri.sock"},"ociHooks":{"hooksPath":"/usr/share/containers/oci/hooks.d"},"podAnnotations":{},"podSecurityContext":{},"priorityClassName":"","resources":{},"serviceAccount":{"name":""}}` | Method for installing Tetagon rthooks (tetragon-rthooks) daemonset The tetragon-rthooks daemonset is responsible for installing run-time hooks on the host. See: https://tetragon.io/docs/concepts/runtime-hooks |
+| rthooks | object | `{"annotations":{},"enabled":false,"extraHookArgs":{},"extraLabels":{},"extraVolumeMounts":[],"failAllowNamespaces":"","image":{"override":null,"repository":"quay.io/cilium/tetragon-rthooks","tag":"v0.5"},"installDir":"/opt/tetragon","interface":"","nriHook":{"nriSocket":"/var/run/nri/nri.sock"},"ociHooks":{"hooksPath":"/usr/share/containers/oci/hooks.d"},"podAnnotations":{},"podSecurityContext":{},"priorityClassName":"","resources":{},"serviceAccount":{"name":""}}` | Method for installing Tetagon rthooks (tetragon-rthooks) daemonset The tetragon-rthooks daemonset is responsible for installing run-time hooks on the host. See: https://tetragon.io/docs/concepts/runtime-hooks |
 | rthooks.annotations | object | `{}` | Annotations for the Tetragon rthooks daemonset |
 | rthooks.enabled | bool | `false` | Enable the Tetragon rthooks daemonset |
 | rthooks.extraHookArgs | object | `{}` | extra args to pass to tetragon-oci-hook |
 | rthooks.extraLabels | object | `{}` | Extra labels for the Tetrargon rthooks daemonset |
 | rthooks.extraVolumeMounts | list | `[]` | Extra volume mounts to add to the oci-hook-setup init container |
 | rthooks.failAllowNamespaces | string | `""` | Comma-separated list of namespaces to allow Pod creation for, in case tetragon-oci-hook fails to reach Tetragon agent. The namespace Tetragon is deployed in is always added as an exception and must not be added again. |
-| rthooks.image | object | `{"override":null,"repository":"quay.io/cilium/tetragon-rthooks","tag":"v0.4"}` | image for the Tetragon rthooks pod |
+| rthooks.image | object | `{"override":null,"repository":"quay.io/cilium/tetragon-rthooks","tag":"v0.5"}` | image for the Tetragon rthooks pod |
 | rthooks.installDir | string | `"/opt/tetragon"` | installDir is the host location where the tetragon-oci-hook binary will be installed |
 | rthooks.interface | string | `""` | Method to use for installing  rthooks. Values:     "oci-hooks":       Add an apppriate file to "/usr/share/containers/oci/hooks.d". Use this with CRI-O.       See https://github.com/containers/common/blob/main/pkg/hooks/docs/oci-hooks.5.md       for more details.       Specific configuration for this interface can be found under "OciHooks".     "nri-hook":      Install the hook via NRI. Use this with containerd. Requires NRI being enabled.      see: https://github.com/containerd/containerd/blob/main/docs/NRI.md.  |
 | rthooks.nriHook | object | `{"nriSocket":"/var/run/nri/nri.sock"}` | configuration for the "nri-hook" interface |
@@ -54,13 +54,17 @@ Helm chart for Tetragon
 | serviceLabelsOverride | object | `{}` |  |
 | tetragon.argsOverride | list | `[]` | Override the arguments. For advanced users only. |
 | tetragon.btf | string | `""` |  |
+| tetragon.cgidmap | object | `{"enabled":false}` | Enabling cgidmap instructs the Tetragon agent to use cgroup ids (instead of cgroup names) for pod association. This feature depends on cri being enabled. |
 | tetragon.clusterName | string | `""` | Name of the cluster where Tetragon is installed. Tetragon uses this value to set the cluster_name field in GetEventsResponse messages. |
 | tetragon.commandOverride | list | `[]` | Override the command. For advanced users only. |
+| tetragon.cri | object | `{"enabled":false,"socketHostPath":""}` | Configure tetragon pod so that it can contact the CRI running on the host |
+| tetragon.cri.socketHostPath | string | `""` | path of the CRI socket on the host. This will typically be "/run/containerd/containerd.sock" for containerd or "/var/run/crio/crio.sock"  for crio. |
 | tetragon.debug | bool | `false` | If you want to run Tetragon in debug mode change this value to true |
 | tetragon.enableK8sAPI | bool | `true` | Access Kubernetes API to associate Tetragon events with Kubernetes pods. |
 | tetragon.enableKeepSensorsOnExit | bool | `false` | Persistent enforcement to allow the enforcement policy to continue running even when its Tetragon process is gone. |
 | tetragon.enableMsgHandlingLatency | bool | `false` | Enable latency monitoring in message handling |
 | tetragon.enablePolicyFilter | bool | `true` | Enable policy filter. This is required for K8s namespace and pod-label filtering. |
+| tetragon.enablePolicyFilterCgroupMap | bool | `false` | Enable policy filter cgroup map. |
 | tetragon.enablePolicyFilterDebug | bool | `false` | Enable policy filter debug messages. |
 | tetragon.enableProcessCred | bool | `false` | Enable Capabilities visibility in exec and kprobe events. |
 | tetragon.enableProcessNs | bool | `false` | Enable Namespaces visibility in exec and kprobe events. |
@@ -140,7 +144,7 @@ Helm chart for Tetragon
 | tetragonOperator.securityContext | object | `{}` | securityContext for the Tetragon Operator Deployment Pods. |
 | tetragonOperator.serviceAccount | object | `{"annotations":{},"create":true,"name":""}` | tetragon-operator service account. |
 | tetragonOperator.strategy | object | `{}` | resources for the Tetragon Operator Deployment update strategy |
-| tetragonOperator.tolerations[0].operator | string | `"Exists"` |  |
+| tetragonOperator.tolerations | list | `[]` |  |
 | tetragonOperator.tracingPolicy.enabled | bool | `true` | Enables the TracingPolicy and TracingPolicyNamespaced CRD creation. |
 | tolerations[0].operator | string | `"Exists"` |  |
 | updateStrategy | object | `{}` |  |

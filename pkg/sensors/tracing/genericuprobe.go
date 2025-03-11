@@ -16,16 +16,17 @@ import (
 	"github.com/cilium/tetragon/pkg/api/ops"
 	api "github.com/cilium/tetragon/pkg/api/tracingapi"
 	"github.com/cilium/tetragon/pkg/bpf"
+	"github.com/cilium/tetragon/pkg/config"
 	gt "github.com/cilium/tetragon/pkg/generictypes"
 	"github.com/cilium/tetragon/pkg/grpc/tracing"
 	"github.com/cilium/tetragon/pkg/idtable"
 	"github.com/cilium/tetragon/pkg/k8s/apis/cilium.io/v1alpha1"
-	"github.com/cilium/tetragon/pkg/kernels"
 	"github.com/cilium/tetragon/pkg/logger"
 	"github.com/cilium/tetragon/pkg/observer"
 	"github.com/cilium/tetragon/pkg/option"
 	"github.com/cilium/tetragon/pkg/selectors"
 	"github.com/cilium/tetragon/pkg/sensors"
+	"github.com/cilium/tetragon/pkg/sensors/base"
 	"github.com/cilium/tetragon/pkg/sensors/program"
 )
 
@@ -142,7 +143,7 @@ func loadSingleUprobeSensor(uprobeEntry *genericUprobe, args sensors.LoadProbeAr
 
 	load.MapLoad = append(load.MapLoad, mapLoad...)
 
-	if err := program.LoadUprobeProgram(args.BPFDir, args.Load, args.Verbose); err != nil {
+	if err := program.LoadUprobeProgram(args.BPFDir, args.Load, args.Maps, args.Verbose); err != nil {
 		return err
 	}
 
@@ -200,7 +201,7 @@ func loadMultiUprobeSensor(ids []idtable.EntryID, args sensors.LoadProbeArgs) er
 
 	load.SetAttachData(data)
 
-	if err := program.LoadMultiUprobeProgram(args.BPFDir, args.Load, args.Verbose); err == nil {
+	if err := program.LoadMultiUprobeProgram(args.BPFDir, args.Load, args.Maps, args.Verbose); err == nil {
 		logger.GetLogger().Infof("Loaded generic uprobe sensor: %s -> %s", load.Name, load.Attach)
 	} else {
 		return err
@@ -246,27 +247,21 @@ type addUprobeIn struct {
 func createGenericUprobeSensor(
 	spec *v1alpha1.TracingPolicySpec,
 	name string,
-	policyName string,
-	namespace string,
+	polInfo *policyInfo,
 ) (*sensors.Sensor, error) {
 	var progs []*program.Program
 	var maps []*program.Map
 	var ids []idtable.EntryID
 	var err error
 
-	options, err := getSpecOptions(spec.Options)
-	if err != nil {
-		return nil, fmt.Errorf("failed to set options: %s", err)
-	}
-
 	in := addUprobeIn{
 		sensorPath: name,
-		policyName: policyName,
+		policyName: polInfo.name,
 
 		// use multi kprobe only if:
 		// - it's not disabled by spec option
 		// - there's support detected
-		useMulti: !options.DisableUprobeMulti && bpf.HasUprobeMulti(),
+		useMulti: !polInfo.specOpts.DisableUprobeMulti && bpf.HasUprobeMulti(),
 	}
 
 	for _, uprobe := range spec.UProbes {
@@ -277,7 +272,7 @@ func createGenericUprobeSensor(
 	}
 
 	if in.useMulti {
-		progs, maps, err = createMultiUprobeSensor(name, ids, policyName)
+		progs, maps, err = createMultiUprobeSensor(name, ids, polInfo.name)
 	} else {
 		progs, maps, err = createSingleUprobeSensor(ids)
 	}
@@ -286,12 +281,14 @@ func createGenericUprobeSensor(
 		return nil, err
 	}
 
+	maps = append(maps, program.MapUserFrom(base.ExecveMap))
+
 	return &sensors.Sensor{
 		Name:      name,
 		Progs:     progs,
 		Maps:      maps,
-		Policy:    policyName,
-		Namespace: namespace,
+		Policy:    polInfo.name,
+		Namespace: polInfo.namespace,
 	}, nil
 }
 
@@ -342,6 +339,10 @@ func addUprobe(spec *v1alpha1.UProbeSpec, ids []idtable.EntryID, in *addUprobeIn
 		if a.Index > 4 {
 			return nil, fmt.Errorf("Error add arg: ArgType %s Index %d out of bounds",
 				a.Type, int(a.Index))
+		}
+
+		if a.Resolve != "" {
+			return nil, fmt.Errorf("Resolving attributes for Uprobes is not supported")
 		}
 		argTypes[a.Index] = int32(argType)
 		argMeta[a.Index] = uint32(argMValue)
@@ -447,9 +448,9 @@ func createUprobeSensorFromEntry(uprobeEntry *genericUprobe,
 	progs []*program.Program, maps []*program.Map) ([]*program.Program, []*program.Map) {
 
 	loadProgName := "bpf_generic_uprobe.o"
-	if kernels.EnableV61Progs() {
+	if config.EnableV61Progs() {
 		loadProgName = "bpf_generic_uprobe_v61.o"
-	} else if kernels.EnableLargeProgs() {
+	} else if config.EnableLargeProgs() {
 		loadProgName = "bpf_generic_uprobe_v53.o"
 	}
 
