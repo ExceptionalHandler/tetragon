@@ -35,8 +35,22 @@ type DeploymentCode int
 
 const (
 	// Deployment modes
-	DEPLOY_UNKNOWN DeploymentCode = iota
+	DEPLOY_UNKNOWN    DeploymentCode = iota
+	DEPLOY_K8S        DeploymentCode = 1  // K8s deployment
+	DEPLOY_CONTAINER  DeploymentCode = 2  // Container docker, podman, etc
+	DEPLOY_SD_SERVICE DeploymentCode = 10 // Systemd service
+	DEPLOY_SD_USER    DeploymentCode = 11 // Systemd user session
 )
+
+func (op DeploymentCode) String() string {
+	return [...]string{
+		DEPLOY_UNKNOWN:    "unknown",
+		DEPLOY_K8S:        "Kubernetes",
+		DEPLOY_CONTAINER:  "Container",
+		DEPLOY_SD_SERVICE: "systemd service",
+		DEPLOY_SD_USER:    "systemd user session",
+	}[op]
+}
 
 // DetectCgroupFSMagic() runs by default DetectCgroupMode()
 // CgroupFsMagicStr() Returns "Cgroupv2" or "Cgroupv1" based on passed magic.
@@ -80,8 +94,8 @@ func DetectCgroupMode() (CgroupModeCode, error) {
 	return CGROUP_UNDEF, fmt.Errorf("not Supported on Windows")
 }
 
-func DetectDeploymentMode() (uint32, error) {
-	return uint32(DEPLOY_UNKNOWN), fmt.Errorf("not Supported on Windows")
+func DetectDeploymentMode() (DeploymentCode, error) {
+	return DEPLOY_UNKNOWN, fmt.Errorf("not Supported on Windows")
 }
 
 // DetectCgroupFSMagic() runs by default DetectCgroupMode()

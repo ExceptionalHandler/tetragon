@@ -134,7 +134,7 @@ func handleExit(r *bytes.Reader) ([]observer.Event, error) {
 type execProbe struct{}
 
 func (e *execProbe) LoadProbe(args sensors.LoadProbeArgs) error {
-	return program.LoadTracepointProgram(args.BPFDir, args.Load, args.Verbose)
+	return program.LoadTracepointProgram(args.BPFDir, args.Load, args.Maps, args.Verbose)
 }
 
 func init() {

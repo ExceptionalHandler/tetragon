@@ -251,6 +251,7 @@ func RegisterProbeType(probeType string, s probeLoader) {
 type LoadProbeArgs struct {
 	BPFDir           string
 	Load             *program.Program
+	Maps             []*program.Map
 	Version, Verbose int
 }
 

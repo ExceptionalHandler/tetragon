@@ -79,7 +79,8 @@ func windowsAttach(load *Program, prog *ebpf.Program, spec *ebpf.ProgramSpec,
 
 	link, err := link.AttachRawLink(link.RawLinkOptions{
 		Program: prog,
-		Attach:  ebpf.AttachWindowsProcess,
+		//ToDo: Fix This
+		// Attach:  ebpf.AttachWindowsProcess,
 	})
 	if err != nil {
 		return nil, err
