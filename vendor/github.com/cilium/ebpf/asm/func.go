@@ -1,29 +1,17 @@
 package asm
 
-import (
-	"runtime"
-
-	"github.com/cilium/ebpf/internal"
-)
+import "github.com/cilium/ebpf/internal/platform"
 
 //go:generate go run golang.org/x/tools/cmd/stringer@latest -output func_string.go -type=BuiltinFunc
 
 // BuiltinFunc is a built-in eBPF function.
 type BuiltinFunc uint32
 
-func (BuiltinFunc) Max() BuiltinFunc {
-	if runtime.GOOS == "windows" {
-		return 0
-	}
-	return FnCgrpStorageDelete
-}
-
-func BuiltinFuncForPlatform(p internal.Platform, value uint32) (BuiltinFunc, error) {
-	return internal.EncodePlatformConstant[BuiltinFunc](p, value)
-}
-
-func (fn BuiltinFunc) Decode() (internal.Platform, uint32) {
-	return internal.DecodePlatformConstant(fn)
+// BuiltinFuncForPlatform returns a platform specific function constant.
+//
+// Use this if the library doesn't provide a constant yet.
+func BuiltinFuncForPlatform(plat string, value uint32) (BuiltinFunc, error) {
+	return platform.EncodeConstant[BuiltinFunc](plat, value)
 }
 
 // Call emits a function call.

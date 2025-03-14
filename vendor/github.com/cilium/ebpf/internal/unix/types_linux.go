@@ -8,8 +8,6 @@ import (
 	linux "golang.org/x/sys/unix"
 )
 
-const EPOLLIN = linux.EPOLLIN
-
 const (
 	BPF_F_NO_PREALLOC         = linux.BPF_F_NO_PREALLOC
 	BPF_F_NUMA_NODE           = linux.BPF_F_NUMA_NODE
@@ -170,6 +168,10 @@ func ByteSliceToString(s []byte) string {
 	return linux.ByteSliceToString(s)
 }
 
+func ByteSliceFromString(s string) ([]byte, error) {
+	return linux.ByteSliceFromString(s)
+}
+
 func Renameat2(olddirfd int, oldpath string, newdirfd int, newpath string, flags uint) error {
 	return linux.Renameat2(olddirfd, oldpath, newdirfd, newpath, flags)
 }
@@ -196,4 +198,8 @@ func SchedSetaffinity(pid int, set *CPUSet) error {
 
 func SchedGetaffinity(pid int, set *CPUSet) error {
 	return linux.SchedGetaffinity(pid, set)
+}
+
+func Auxv() ([][2]uintptr, error) {
+	return linux.Auxv()
 }

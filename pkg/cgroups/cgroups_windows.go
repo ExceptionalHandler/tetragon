@@ -7,6 +7,37 @@ import (
 	"fmt"
 )
 
+const (
+	// Generic unset value that means undefined or not set
+	CGROUP_UNSET_VALUE = 0
+
+	// Max cgroup subsystems count that is used from BPF side
+	// to define a max index for the default controllers on tasks.
+	// For further documentation check BPF part.
+	CGROUP_SUBSYS_COUNT = 15
+
+	// The default hierarchy for cgroupv2
+	CGROUP_DEFAULT_HIERARCHY = 0
+)
+
+type CgroupModeCode int
+
+const (
+	/* Cgroup Mode:
+	 * https://systemd.io/CGROUP_DELEGATION/
+	 * But this should work also for non-systemd environments: where
+	 * only legacy or unified are available by default.
+	 */
+	CGROUP_UNDEF CgroupModeCode = iota
+)
+
+type DeploymentCode int
+
+const (
+	// Deployment modes
+	DEPLOY_UNKNOWN DeploymentCode = iota
+)
+
 // DetectCgroupFSMagic() runs by default DetectCgroupMode()
 // CgroupFsMagicStr() Returns "Cgroupv2" or "Cgroupv1" based on passed magic.
 func CgroupFsMagicStr(magic uint64) string {

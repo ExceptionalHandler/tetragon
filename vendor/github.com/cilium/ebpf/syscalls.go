@@ -12,17 +12,19 @@ import (
 	"github.com/cilium/ebpf/internal"
 	"github.com/cilium/ebpf/internal/errno"
 	"github.com/cilium/ebpf/internal/linux"
+	"github.com/cilium/ebpf/internal/platform"
 	"github.com/cilium/ebpf/internal/sys"
 	"github.com/cilium/ebpf/internal/tracefs"
+	"github.com/cilium/ebpf/internal/unix"
 )
 
 var (
 	// pre-allocating these here since they may
 	// get called in hot code paths and cause
 	// unnecessary memory allocations
-	sysErrKeyNotExist  = sys.Error(ErrKeyNotExist, errno.ENOENT)
-	sysErrKeyExist     = sys.Error(ErrKeyExist, errno.EEXIST)
-	sysErrNotSupported = sys.Error(ErrNotSupported, errno.ENOTSUPP)
+	sysErrKeyNotExist  = sys.Error(ErrKeyNotExist, unix.ENOENT)
+	sysErrKeyExist     = sys.Error(ErrKeyExist, unix.EEXIST)
+	sysErrNotSupported = sys.Error(ErrNotSupported, sys.ENOTSUPP)
 )
 
 // invalidBPFObjNameChar returns true if char may not appear in
@@ -56,13 +58,14 @@ func progLoad(insns asm.Instructions, typ ProgramType, license string) (*sys.FD,
 	return sys.ProgLoad(&sys.ProgLoadAttr{
 		ProgType: sys.ProgType(typ),
 		License:  sys.NewStringPointer(license),
-		Insns:    sys.NewSlicePointer(bytecode),
+		Insns:    sys.SlicePointer(bytecode),
 		InsnCnt:  uint32(len(bytecode) / asm.InstructionSize),
 	})
 }
 
 var haveNestedMaps = internal.NewFeatureTest("nested maps", func() error {
-	if runtime.GOOS == "windows" {
+	if platform.IsWindows {
+		// We only support efW versions which have this feature, no need to probe.
 		return nil
 	}
 
@@ -175,7 +178,8 @@ func wrapMapError(err error) error {
 }
 
 var haveObjName = internal.NewFeatureTest("object names", func() error {
-	if runtime.GOOS == "windows" {
+	if platform.IsWindows {
+		// We only support efW versions which have this feature, no need to probe.
 		return nil
 	}
 
@@ -187,9 +191,17 @@ var haveObjName = internal.NewFeatureTest("object names", func() error {
 		MapName:    sys.NewObjName("feature_test"),
 	}
 
+	// Tolerate EPERM as this runs during ELF loading which is potentially
+	// unprivileged. Only EINVAL is conclusive, thrown from CHECK_ATTR.
 	fd, err := sys.MapCreate(&attr)
-	if err != nil {
+	if errors.Is(err, unix.EPERM) {
+		return nil
+	}
+	if errors.Is(err, unix.EINVAL) {
 		return internal.ErrNotSupported
+	}
+	if err != nil {
+		return err
 	}
 
 	_ = fd.Close()
@@ -197,7 +209,8 @@ var haveObjName = internal.NewFeatureTest("object names", func() error {
 }, "4.15", "windows:0.20.0")
 
 var objNameAllowsDot = internal.NewFeatureTest("dot in object names", func() error {
-	if runtime.GOOS == "windows" {
+	if platform.IsWindows {
+		// We only support efW versions which have this feature, no need to probe.
 		return nil
 	}
 
@@ -213,9 +226,18 @@ var objNameAllowsDot = internal.NewFeatureTest("dot in object names", func() err
 		MapName:    sys.NewObjName(".test"),
 	}
 
+	// Tolerate EPERM, otherwise MapSpec.Name has its dots removed when run by
+	// unprivileged tools. (bpf2go, other code gen). Only EINVAL is conclusive,
+	// thrown from bpf_obj_name_cpy().
 	fd, err := sys.MapCreate(&attr)
-	if err != nil {
+	if errors.Is(err, unix.EPERM) {
+		return nil
+	}
+	if errors.Is(err, unix.EINVAL) {
 		return internal.ErrNotSupported
+	}
+	if err != nil {
+		return err
 	}
 
 	_ = fd.Close()
@@ -332,7 +354,7 @@ var haveProgramExtInfos = internal.NewFeatureTest("program ext_infos", func() er
 	_, err := sys.ProgLoad(&sys.ProgLoadAttr{
 		ProgType:    sys.ProgType(SocketFilter),
 		License:     sys.NewStringPointer("MIT"),
-		Insns:       sys.NewSlicePointer(bytecode),
+		Insns:       sys.SlicePointer(bytecode),
 		InsnCnt:     uint32(len(bytecode) / asm.InstructionSize),
 		FuncInfoCnt: 1,
 		ProgBtfFd:   math.MaxUint32,

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/cilium/ebpf/internal"
+	"github.com/cilium/ebpf/internal/platform"
 	"github.com/cilium/ebpf/internal/sys"
 )
 
@@ -43,16 +44,7 @@ type Instruction struct {
 }
 
 // Unmarshal decodes a BPF instruction.
-func (ins *Instruction) Unmarshal(r io.Reader, bo binary.ByteOrder) (uint64, error) {
-	err := ins.UnmarshalForPlatform(r, bo, internal.NativePlatform)
-	if err != nil {
-		return 0, err
-	}
-
-	return ins.Size(), nil
-}
-
-func (ins *Instruction) UnmarshalForPlatform(r io.Reader, bo binary.ByteOrder, plat internal.Platform) error {
+func (ins *Instruction) Unmarshal(r io.Reader, bo binary.ByteOrder, platform string) error {
 	data := make([]byte, InstructionSize)
 	if _, err := io.ReadFull(r, data); err != nil {
 		return err
@@ -71,7 +63,7 @@ func (ins *Instruction) UnmarshalForPlatform(r io.Reader, bo binary.ByteOrder, p
 	ins.Offset = int16(bo.Uint16(data[2:4]))
 
 	if ins.IsBuiltinCall() {
-		fn, err := BuiltinFuncForPlatform(internal.NativePlatform, uint32(ins.Constant))
+		fn, err := BuiltinFuncForPlatform(platform, uint32(ins.Constant))
 		if err != nil {
 			return err
 		}
@@ -151,9 +143,9 @@ func (ins Instruction) Marshal(w io.Writer, bo binary.ByteOrder) (uint64, error)
 
 	if ins.IsBuiltinCall() {
 		fn := BuiltinFunc(ins.Constant)
-		p, value := fn.Decode()
-		if p != internal.NativePlatform {
-			return 0, fmt.Errorf("function %s is not supported on this platform", fn)
+		plat, value := platform.DecodeConstant(fn)
+		if plat != platform.Native {
+			return 0, fmt.Errorf("function %s (%s): %w", fn, plat, internal.ErrNotSupportedOnOS)
 		}
 		cons = int32(value)
 	} else if ins.OpCode.Class().IsALU() {
@@ -553,11 +545,11 @@ type FDer interface {
 type Instructions []Instruction
 
 // AppendInstructions decodes [Instruction] from r and appends them to insns.
-func AppendInstructions(insns Instructions, r io.Reader, bo binary.ByteOrder, plat internal.Platform) (Instructions, error) {
+func AppendInstructions(insns Instructions, r io.Reader, bo binary.ByteOrder, platform string) (Instructions, error) {
 	var offset uint64
 	for {
 		var ins Instruction
-		err := ins.UnmarshalForPlatform(r, bo, plat)
+		err := ins.Unmarshal(r, bo, platform)
 		if errors.Is(err, io.EOF) {
 			break
 		}
@@ -570,20 +562,6 @@ func AppendInstructions(insns Instructions, r io.Reader, bo binary.ByteOrder, pl
 	}
 
 	return insns, nil
-}
-
-// Unmarshal unmarshals an Instructions from a binary instruction stream.
-// All instructions in insns are replaced by instructions decoded from r.
-//
-// Deprecated: use [AppendInstructions] instead.
-func (insns *Instructions) Unmarshal(r io.Reader, bo binary.ByteOrder) error {
-	if len(*insns) > 0 {
-		*insns = nil
-	}
-
-	var err error
-	*insns, err = AppendInstructions(*insns, r, bo, internal.NativePlatform)
-	return err
 }
 
 // Name returns the name of the function insns belongs to, if any.

@@ -4,8 +4,13 @@ import (
 	"runtime"
 	"unsafe"
 
-	"github.com/cilium/ebpf/internal/errno"
+	"github.com/cilium/ebpf/internal/unix"
 )
+
+// ENOTSUPP is a Linux internal error code that has leaked into UAPI.
+//
+// It is not the same as ENOTSUP or EOPNOTSUPP.
+const ENOTSUPP = unix.Errno(524)
 
 // Info is implemented by all structs that can be passed to the ObjInfo syscall.
 //
@@ -89,7 +94,7 @@ func ObjInfo(fd *FD, info Info) error {
 	err := ObjGetInfoByFd(&ObjGetInfoByFdAttr{
 		BpfFd:   fd.Uint(),
 		InfoLen: len,
-		Info:    NewPointer(ptr),
+		Info:    UnsafePointer(ptr),
 	})
 	runtime.KeepAlive(fd)
 	return err
@@ -114,6 +119,12 @@ const (
 	BPF_LOG_LEVEL2
 	BPF_LOG_STATS
 )
+
+// MapID uniquely identifies a bpf_map.
+type MapID uint32
+
+// ProgramID uniquely identifies a bpf_map.
+type ProgramID uint32
 
 // LinkID uniquely identifies a bpf_link.
 type LinkID uint32
@@ -143,12 +154,31 @@ const (
 const BPF_TAG_SIZE = 8
 const BPF_OBJ_NAME_LEN = 16
 
-type syscallError struct {
-	error
-	errno errno.Errno
+// wrappedErrno wraps [unix.Errno] to prevent direct comparisons with
+// syscall.E* or unix.E* constants.
+//
+// You should never export an error of this type.
+type wrappedErrno struct {
+	unix.Errno
 }
 
-func Error(err error, errno errno.Errno) error {
+func (we wrappedErrno) Unwrap() error {
+	return we.Errno
+}
+
+func (we wrappedErrno) Error() string {
+	if we.Errno == ENOTSUPP {
+		return "operation not supported"
+	}
+	return we.Errno.Error()
+}
+
+type syscallError struct {
+	error
+	errno unix.Errno
+}
+
+func Error(err error, errno unix.Errno) error {
 	return &syscallError{err, errno}
 }
 

@@ -1,19 +1,11 @@
 package ebpf
 
 import (
-	"github.com/cilium/ebpf/internal"
+	"github.com/cilium/ebpf/internal/platform"
 	"github.com/cilium/ebpf/internal/sys"
 )
 
 //go:generate go run golang.org/x/tools/cmd/stringer@latest -output types_string.go -type=MapType,ProgramType,PinType
-
-type Platform = internal.Platform
-
-const (
-	UnspecifiedPlatform = internal.UnspecifiedPlatform
-	Linux               = internal.Linux
-	Windows             = internal.Windows
-)
 
 // MapType indicates the type map structure
 // that will be initialized in the kernel.
@@ -21,7 +13,7 @@ type MapType uint32
 
 // All the various map types that can be created
 const (
-	UnspecifiedMap MapType = MapType((Linux-1)<<internal.PlatformShift | iota)
+	UnspecifiedMap MapType = MapType(platform.LinuxTag | iota)
 	// Hash is a hash map
 	Hash
 	// Array is an array map
@@ -115,7 +107,7 @@ const (
 
 // Map types (Windows).
 const (
-	WindowsHash MapType = MapType((Windows-1)<<internal.PlatformShift | iota + 1)
+	WindowsHash MapType = MapType(platform.WindowsTag | iota + 1)
 	WindowsArray
 	WindowsProgramArray
 	WindowsPerCPUHash
@@ -131,13 +123,10 @@ const (
 )
 
 // MapTypeForPlatform returns a platform specific map type.
-func MapTypeForPlatform(r Platform, typ uint32) (MapType, error) {
-	return internal.EncodePlatformConstant[MapType](r, typ)
-}
-
-// Platform returns the [Platform] this map type belongs to.
-func (mt MapType) Decode() (Platform, uint32) {
-	return internal.DecodePlatformConstant(mt)
+//
+// Use this if the library doesn't provide a constant yet.
+func MapTypeForPlatform(plat string, typ uint32) (MapType, error) {
+	return platform.EncodeConstant[MapType](plat, typ)
 }
 
 // hasPerCPUValue returns true if the Map stores a value per CPU.
@@ -225,26 +214,23 @@ const (
 	Netfilter             = ProgramType(sys.BPF_PROG_TYPE_NETFILTER)
 )
 
+// eBPF program types (Windows).
+//
 // See https://github.com/microsoft/ebpf-for-windows/blob/main/include/ebpf_structs.h#L170
 const (
-	WindowsXDP ProgramType = ProgramType((Windows-1)<<internal.PlatformShift) | (iota + 1)
+	WindowsXDP ProgramType = ProgramType(platform.WindowsTag) | (iota + 1)
 	WindowsBind
 	WindowsCGroupSockAddr
 	WindowsSockOps
-	WindowsXDPTest ProgramType = ProgramType((Windows-1)<<internal.PlatformShift) | 998
-	WindowsSample  ProgramType = ProgramType((Windows-1)<<internal.PlatformShift) | 999
-
-	// TODO(windows): "provisional" according to ntosebpfext.
-	WindowsNetEvent ProgramType = ProgramType((Windows-1)<<internal.PlatformShift) | 99901
-	WindowsProcess  ProgramType = ProgramType((Windows-1)<<internal.PlatformShift) | 99999
+	WindowsXDPTest ProgramType = ProgramType(platform.WindowsTag) | 998
+	WindowsSample  ProgramType = ProgramType(platform.WindowsTag) | 999
 )
 
-func ProgramTypeForPlatform(p Platform, value uint32) (ProgramType, error) {
-	return internal.EncodePlatformConstant[ProgramType](p, value)
-}
-
-func (pt ProgramType) Decode() (Platform, uint32) {
-	return internal.DecodePlatformConstant(pt)
+// ProgramTypeForPlatform returns a platform specific program type.
+//
+// Use this if the library doesn't provide a constant yet.
+func ProgramTypeForPlatform(plat string, value uint32) (ProgramType, error) {
+	return platform.EncodeConstant[ProgramType](plat, value)
 }
 
 // AttachType of the eBPF program, needed to differentiate allowed context accesses in
@@ -257,6 +243,7 @@ type AttachType uint32
 // AttachNone is an alias for AttachCGroupInetIngress for readability reasons.
 const AttachNone AttachType = 0
 
+// Attach types (Linux).
 const (
 	AttachCGroupInetIngress          = AttachType(sys.BPF_CGROUP_INET_INGRESS)
 	AttachCGroupInetEgress           = AttachType(sys.BPF_CGROUP_INET_EGRESS)
@@ -301,6 +288,7 @@ const (
 	AttachSkReuseportSelectOrMigrate = AttachType(sys.BPF_SK_REUSEPORT_SELECT_OR_MIGRATE)
 	AttachPerfEvent                  = AttachType(sys.BPF_PERF_EVENT)
 	AttachTraceKprobeMulti           = AttachType(sys.BPF_TRACE_KPROBE_MULTI)
+	AttachTraceKprobeSession         = AttachType(sys.BPF_TRACE_KPROBE_SESSION)
 	AttachLSMCgroup                  = AttachType(sys.BPF_LSM_CGROUP)
 	AttachStructOps                  = AttachType(sys.BPF_STRUCT_OPS)
 	AttachNetfilter                  = AttachType(sys.BPF_NETFILTER)
@@ -316,9 +304,11 @@ const (
 	AttachNetkitPeer                 = AttachType(sys.BPF_NETKIT_PEER)
 )
 
+// Attach types (Windows).
+//
 // See https://github.com/microsoft/ebpf-for-windows/blob/main/include/ebpf_structs.h#L260
 const (
-	AttachWindowsXDP = AttachType((Windows-1)<<internal.PlatformShift | iota + 1)
+	AttachWindowsXDP = AttachType(platform.WindowsTag | iota + 1)
 	AttachWindowsBind
 	AttachWindowsCGroupInet4Connect
 	AttachWindowsCGroupInet6Connect
@@ -327,18 +317,13 @@ const (
 	AttachWindowsCGroupSockOps
 	AttachWindowsSample
 	AttachWindowsXDPTest
-
-	// TODO(windows): this is provisional according to ntosebpfext.
-	AttachWindowsNetEvent = AttachType((Windows-1)<<internal.PlatformShift | 99900)
-	AttachWindowsProcess  = AttachType((Windows-1)<<internal.PlatformShift | 99999)
 )
 
-func AttachTypeForPlatform(p Platform, value uint32) (AttachType, error) {
-	return internal.EncodePlatformConstant[AttachType](p, value)
-}
-
-func (at AttachType) Decode() (Platform, uint32) {
-	return internal.DecodePlatformConstant(at)
+// AttachTypeForPlatform returns a platform specific attach type.
+//
+// Use this if the library doesn't provide a constant yet.
+func AttachTypeForPlatform(plat string, value uint32) (AttachType, error) {
+	return platform.EncodeConstant[AttachType](plat, value)
 }
 
 // AttachFlags of the eBPF program used in BPF_PROG_ATTACH command

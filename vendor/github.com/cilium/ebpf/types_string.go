@@ -42,19 +42,19 @@ func _() {
 	_ = x[UserRingbuf-31]
 	_ = x[CgroupStorage-32]
 	_ = x[Arena-33]
-	_ = x[WindowsHash-16777217]
-	_ = x[WindowsArray-16777218]
-	_ = x[WindowsProgramArray-16777219]
-	_ = x[WindowsPerCPUHash-16777220]
-	_ = x[WindowsPerCPUArray-16777221]
-	_ = x[WindowsHashOfMaps-16777222]
-	_ = x[WindowsArrayOfMaps-16777223]
-	_ = x[WindowsLRUHash-16777224]
-	_ = x[WindowsLPMTrie-16777225]
-	_ = x[WindowsQueue-16777226]
-	_ = x[WindowsLRUCPUHash-16777227]
-	_ = x[WindowsStack-16777228]
-	_ = x[WindowsRingBuf-16777229]
+	_ = x[WindowsHash-268435457]
+	_ = x[WindowsArray-268435458]
+	_ = x[WindowsProgramArray-268435459]
+	_ = x[WindowsPerCPUHash-268435460]
+	_ = x[WindowsPerCPUArray-268435461]
+	_ = x[WindowsHashOfMaps-268435462]
+	_ = x[WindowsArrayOfMaps-268435463]
+	_ = x[WindowsLRUHash-268435464]
+	_ = x[WindowsLPMTrie-268435465]
+	_ = x[WindowsQueue-268435466]
+	_ = x[WindowsLRUCPUHash-268435467]
+	_ = x[WindowsStack-268435468]
+	_ = x[WindowsRingBuf-268435469]
 }
 
 const (
@@ -71,8 +71,8 @@ func (i MapType) String() string {
 	switch {
 	case i <= 33:
 		return _MapType_name_0[_MapType_index_0[i]:_MapType_index_0[i+1]]
-	case 16777217 <= i && i <= 16777229:
-		i -= 16777217
+	case 268435457 <= i && i <= 268435469:
+		i -= 268435457
 		return _MapType_name_1[_MapType_index_1[i]:_MapType_index_1[i+1]]
 	default:
 		return "MapType(" + strconv.FormatInt(int64(i), 10) + ")"
@@ -115,22 +115,18 @@ func _() {
 	_ = x[SkLookup-30]
 	_ = x[Syscall-31]
 	_ = x[Netfilter-32]
-	_ = x[WindowsXDP-16777217]
-	_ = x[WindowsBind-16777218]
-	_ = x[WindowsCGroupSockAddr-16777219]
-	_ = x[WindowsSockOps-16777220]
-	_ = x[WindowsXDPTest-16778214]
-	_ = x[WindowsSample-16778215]
-	_ = x[WindowsNetEvent-16877117]
-	_ = x[WindowsProcess-16877215]
+	_ = x[WindowsXDP-268435457]
+	_ = x[WindowsBind-268435458]
+	_ = x[WindowsCGroupSockAddr-268435459]
+	_ = x[WindowsSockOps-268435460]
+	_ = x[WindowsXDPTest-268436454]
+	_ = x[WindowsSample-268436455]
 }
 
 const (
 	_ProgramType_name_0 = "UnspecifiedProgramSocketFilterKprobeSchedCLSSchedACTTracePointXDPPerfEventCGroupSKBCGroupSockLWTInLWTOutLWTXmitSockOpsSkSKBCGroupDeviceSkMsgRawTracepointCGroupSockAddrLWTSeg6LocalLircMode2SkReuseportFlowDissectorCGroupSysctlRawTracepointWritableCGroupSockoptTracingStructOpsExtensionLSMSkLookupSyscallNetfilter"
 	_ProgramType_name_1 = "WindowsXDPWindowsBindWindowsCGroupSockAddrWindowsSockOps"
 	_ProgramType_name_2 = "WindowsXDPTestWindowsSample"
-	_ProgramType_name_3 = "WindowsNetEvent"
-	_ProgramType_name_4 = "WindowsProcess"
 )
 
 var (
@@ -143,16 +139,12 @@ func (i ProgramType) String() string {
 	switch {
 	case i <= 32:
 		return _ProgramType_name_0[_ProgramType_index_0[i]:_ProgramType_index_0[i+1]]
-	case 16777217 <= i && i <= 16777220:
-		i -= 16777217
+	case 268435457 <= i && i <= 268435460:
+		i -= 268435457
 		return _ProgramType_name_1[_ProgramType_index_1[i]:_ProgramType_index_1[i+1]]
-	case 16778214 <= i && i <= 16778215:
-		i -= 16778214
+	case 268436454 <= i && i <= 268436455:
+		i -= 268436454
 		return _ProgramType_name_2[_ProgramType_index_2[i]:_ProgramType_index_2[i+1]]
-	case i == 16877117:
-		return _ProgramType_name_3
-	case i == 16877215:
-		return _ProgramType_name_4
 	default:
 		return "ProgramType(" + strconv.FormatInt(int64(i), 10) + ")"
 	}

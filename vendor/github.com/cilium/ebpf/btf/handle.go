@@ -10,6 +10,7 @@ import (
 
 	"github.com/cilium/ebpf/internal"
 	"github.com/cilium/ebpf/internal/errno"
+	"github.com/cilium/ebpf/internal/platform"
 	"github.com/cilium/ebpf/internal/sys"
 )
 
@@ -44,7 +45,7 @@ func NewHandle(b *Builder) (*Handle, error) {
 func NewHandleFromRawBTF(btf []byte) (*Handle, error) {
 	const minLogSize = 64 * 1024
 
-	if runtime.GOOS != "linux" {
+	if platform.IsWindows {
 		return nil, fmt.Errorf("btf: handle: %w", internal.ErrNotSupportedOnOS)
 	}
 
@@ -53,7 +54,7 @@ func NewHandleFromRawBTF(btf []byte) (*Handle, error) {
 	}
 
 	attr := &sys.BtfLoadAttr{
-		Btf:     sys.NewSlicePointer(btf),
+		Btf:     sys.SlicePointer(btf),
 		BtfSize: uint32(len(btf)),
 	}
 
@@ -96,7 +97,7 @@ func NewHandleFromRawBTF(btf []byte) (*Handle, error) {
 
 		logBuf = make([]byte, logSize)
 		attr.BtfLogSize = logSize
-		attr.BtfLogBuf = sys.NewSlicePointer(logBuf)
+		attr.BtfLogBuf = sys.SlicePointer(logBuf)
 		attr.BtfLogLevel = 1
 	}
 
@@ -115,7 +116,7 @@ func NewHandleFromRawBTF(btf []byte) (*Handle, error) {
 //
 // Requires CAP_SYS_ADMIN.
 func NewHandleFromID(id ID) (*Handle, error) {
-	if runtime.GOOS != "linux" {
+	if platform.IsWindows {
 		return nil, fmt.Errorf("btf: handle: %w", internal.ErrNotSupportedOnOS)
 	}
 
@@ -146,7 +147,8 @@ func (h *Handle) Spec(base *Spec) (*Spec, error) {
 
 	var btfInfo sys.BtfInfo
 	btfBuffer := make([]byte, h.size)
-	btfInfo.Btf, btfInfo.BtfSize = sys.NewSlicePointerLen(btfBuffer)
+	btfInfo.Btf = sys.SlicePointer(btfBuffer)
+	btfInfo.BtfSize = uint32(len(btfBuffer))
 
 	if err := sys.ObjInfo(h.fd, &btfInfo); err != nil {
 		return nil, err
@@ -221,7 +223,8 @@ func newHandleInfoFromFD(fd *sys.FD) (*HandleInfo, error) {
 	btfInfo.BtfSize = 0
 
 	nameBuffer := make([]byte, btfInfo.NameLen)
-	btfInfo.Name, btfInfo.NameLen = sys.NewSlicePointerLen(nameBuffer)
+	btfInfo.Name = sys.SlicePointer(nameBuffer)
+	btfInfo.NameLen = uint32(len(nameBuffer))
 	if err := sys.ObjInfo(fd, &btfInfo); err != nil {
 		return nil, err
 	}
@@ -259,8 +262,8 @@ type HandleIterator struct {
 // Returns true if another BTF object was found. Call [HandleIterator.Err] after
 // the function returns false.
 func (it *HandleIterator) Next() bool {
-	if runtime.GOOS != "linux" {
-		it.err = internal.ErrNotSupportedOnOS
+	if platform.IsWindows {
+		it.err = fmt.Errorf("btf: %w", internal.ErrNotSupportedOnOS)
 		return false
 	}
 

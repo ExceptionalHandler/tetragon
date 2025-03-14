@@ -10,7 +10,6 @@ import (
 	"io"
 	"math"
 	"os"
-	"runtime"
 	"strings"
 
 	"github.com/cilium/ebpf/asm"
@@ -54,7 +53,7 @@ type elfCode struct {
 	kfuncs   map[string]*btf.Func
 	ksyms    map[string]struct{}
 	kconfig  *MapSpec
-	platform Platform
+	platform string
 }
 
 // LoadCollectionSpec parses an ELF file into a CollectionSpec.
@@ -134,7 +133,7 @@ func LoadCollectionSpecFromReader(rd io.ReaderAt) (*CollectionSpec, error) {
 		return nil, fmt.Errorf("load version: %w", err)
 	}
 
-	plat := Linux
+	plat := "linux"
 	if windowsPlatformSection != nil {
 		contents, err := io.ReadAll(windowsPlatformSection.Open())
 		if err != nil {
@@ -143,7 +142,7 @@ func LoadCollectionSpecFromReader(rd io.ReaderAt) (*CollectionSpec, error) {
 		if !bytes.Equal(contents, []byte{1}) {
 			return nil, fmt.Errorf("section %s has unexpected contents", windowsPlatformSection.Name)
 		}
-		plat = Windows
+		plat = "windows"
 	}
 
 	btfSpec, btfExtInfo, err := btf.LoadSpecAndExtInfosFromReader(rd)
@@ -208,7 +207,6 @@ func LoadCollectionSpecFromReader(rd io.ReaderAt) (*CollectionSpec, error) {
 		ec.vars,
 		btfSpec,
 		ec.ByteOrder,
-		Linux,
 	}, nil
 }
 
@@ -382,9 +380,9 @@ func (ec *elfCode) loadProgramSections() (map[string]*ProgramSpec, error) {
 			attachTo   string
 		)
 		switch ec.platform {
-		case Linux:
+		case "linux":
 			progType, attachType, progFlags, attachTo, err = getLinuxProgramType(sec.Name)
-		case Windows:
+		case "windows":
 			progType, attachType, progFlags, attachTo, err = getWindowsProgramType(sec.Name)
 		default:
 			return nil, fmt.Errorf("unsupported platform %s", ec.platform)
@@ -788,7 +786,7 @@ func (ec *elfCode) loadMaps() error {
 				return fmt.Errorf("map %s: missing value size", mapName)
 			case binary.Read(lr, ec.ByteOrder, &spec.MaxEntries) != nil:
 				return fmt.Errorf("map %s: missing max entries", mapName)
-			case ec.platform == Linux && binary.Read(lr, ec.ByteOrder, &spec.Flags) != nil:
+			case ec.platform == "linux" && binary.Read(lr, ec.ByteOrder, &spec.Flags) != nil:
 				return fmt.Errorf("map %s: missing flags", mapName)
 			}
 
@@ -1023,8 +1021,8 @@ func (ec *elfCode) mapSpecFromBTF(es *elfSection, vs *btf.VarSecinfo, def *btf.S
 			case *btf.Struct:
 				// The values member pointing to an array of structs means we're expecting
 				// a map-in-map declaration.
-				if runtime.GOOS != "windows" && (mapType != ArrayOfMaps && mapType != HashOfMaps) {
-					return nil, errors.New("outer map needs to be an array or a hash of maps")
+				if !mapType.canStoreMap() {
+					return nil, fmt.Errorf("outer map type %s doesn't support storing maps", mapType)
 				}
 				if inner {
 					return nil, fmt.Errorf("nested inner maps are not supported")
@@ -1185,9 +1183,14 @@ func (ec *elfCode) loadDataSections() error {
 			continue
 		}
 
-		if sec.references == 0 {
-			// Prune data sections which are not referenced by any
-			// instructions.
+		// If a section has no references, it will be freed as soon as the
+		// Collection closes, so creating and populating it is wasteful. If it has
+		// no symbols, it is likely an ephemeral section used during compilation
+		// that wasn't sanitized by the bpf linker. (like .rodata.str1.1)
+		//
+		// No symbols means no VariableSpecs can be generated from it, making it
+		// pointless to emit a data section for.
+		if sec.references == 0 && len(sec.symbols) == 0 {
 			continue
 		}
 
@@ -1280,7 +1283,8 @@ func (ec *elfCode) loadDataSections() error {
 						return fmt.Errorf("data section %s: anonymous variable %v", sec.Name, v)
 					}
 
-					if _, ok := v.Type.(*btf.Var); !ok {
+					vt, ok := v.Type.(*btf.Var)
+					if !ok {
 						return fmt.Errorf("data section %s: unexpected type %T for variable %s", sec.Name, v.Type, name)
 					}
 
@@ -1298,7 +1302,9 @@ func (ec *elfCode) loadDataSections() error {
 						return fmt.Errorf("data section %s: variable %s size in datasec (%d) doesn't match ELF symbol size (%d)", sec.Name, name, v.Size, ev.size)
 					}
 
-					ev.t = v.Type
+					// Decouple the Var in the VariableSpec from the underlying DataSec in
+					// the MapSpec to avoid modifications from affecting map loads later on.
+					ev.t = btf.Copy(vt).(*btf.Var)
 				}
 			}
 		}
@@ -1423,12 +1429,12 @@ func getLinuxProgramType(sectionName string) (ProgramType, AttachType, uint32, s
 			continue
 		}
 
-		programType, err := ProgramTypeForPlatform(Linux, uint32(t.programType))
+		programType, err := ProgramTypeForPlatform("linux", uint32(t.programType))
 		if err != nil {
 			return 0, 0, 0, "", err
 		}
 
-		attachType, err := AttachTypeForPlatform(Linux, uint32(t.attachType))
+		attachType, err := AttachTypeForPlatform("linux", uint32(t.attachType))
 		if err != nil {
 			return 0, 0, 0, "", err
 		}

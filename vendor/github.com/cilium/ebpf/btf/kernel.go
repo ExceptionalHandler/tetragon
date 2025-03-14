@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sync"
 
 	"github.com/cilium/ebpf/internal"
 	"github.com/cilium/ebpf/internal/linux"
+	"github.com/cilium/ebpf/internal/platform"
 )
 
 var kernelBTF = struct {
@@ -94,7 +94,7 @@ func LoadKernelModuleSpec(module string) (*Spec, error) {
 }
 
 func loadKernelSpec() (_ *Spec, fallback bool, _ error) {
-	if runtime.GOOS != "linux" {
+	if platform.IsWindows {
 		return nil, false, internal.ErrNotSupportedOnOS
 	}
 
@@ -117,7 +117,7 @@ func loadKernelSpec() (_ *Spec, fallback bool, _ error) {
 }
 
 func loadKernelModuleSpec(module string, base *Spec) (*Spec, error) {
-	if runtime.GOOS != "linux" {
+	if platform.IsWindows {
 		return nil, internal.ErrNotSupportedOnOS
 	}
 
@@ -137,7 +137,7 @@ func loadKernelModuleSpec(module string, base *Spec) (*Spec, error) {
 
 // findVMLinux scans multiple well-known paths for vmlinux kernel images.
 func findVMLinux() (*os.File, error) {
-	if runtime.GOOS != "linux" {
+	if platform.IsWindows {
 		return nil, fmt.Errorf("find vmlinux: %w", internal.ErrNotSupportedOnOS)
 	}
 

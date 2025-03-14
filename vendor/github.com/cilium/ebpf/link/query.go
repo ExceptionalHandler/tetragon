@@ -4,7 +4,6 @@ package link
 
 import (
 	"fmt"
-	"unsafe"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/internal/sys"
@@ -86,13 +85,13 @@ func QueryPrograms(opts QueryOptions) (*QueryResult, error) {
 		AttachType:        sys.AttachType(opts.Attach),
 		QueryFlags:        opts.QueryFlags,
 		Count:             count,
-		ProgIds:           sys.NewPointer(unsafe.Pointer(&progIds[0])),
+		ProgIds:           sys.SlicePointer(progIds),
 	}
 
 	var linkIds []ID
 	if haveLinkIDs {
 		linkIds = make([]ID, count)
-		attr.LinkIds = sys.NewPointer(unsafe.Pointer(&linkIds[0]))
+		attr.LinkIds = sys.SlicePointer(linkIds)
 	}
 
 	if err := sys.ProgQuery(&attr); err != nil {
