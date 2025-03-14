@@ -48,8 +48,7 @@ func GetKernelVersion(kernelVersion, procfs string) (int, string, error) {
 }
 
 func GenericKprobeObjs() (string, string) {
-	//ToDo: select a good prog for Windows
-	return "bpf_generic.o", "bpf_generic.o"
+	return "", ""
 }
 
 func MinKernelVersion(kernel string) bool {
