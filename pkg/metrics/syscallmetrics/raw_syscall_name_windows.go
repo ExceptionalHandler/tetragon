@@ -8,9 +8,5 @@ import (
 )
 
 func rawSyscallName(tp *tetragon.ProcessTracepoint) string {
-
-	if tp == nil {
-		return ""
-	}
 	return ""
 }
