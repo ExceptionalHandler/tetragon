@@ -3,10 +3,6 @@
 
 package config
 
-import (
-	"github.com/cilium/tetragon/pkg/kernels"
-)
-
 // ExecObj returns the exec object based on the kernel version
 func ExecObj() string {
 	return ""
@@ -14,13 +10,6 @@ func ExecObj() string {
 
 // GenericKprobeObjs returns the generic kprobe and generic retprobe objects
 func GenericKprobeObjs() (string, string) {
-	if EnableV61Progs() {
-		return "", ""
-	} else if kernels.MinKernelVersion("5.11") {
-		return "", ""
-	} else if EnableLargeProgs() {
-		return "", ""
-	}
 	return "", ""
 }
 
