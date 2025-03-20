@@ -12,8 +12,5 @@ import (
 
 func isPidAlive(pid string) bool {
 	_, err := os.Stat(filepath.Join(option.Config.ProcFS, pid))
-	if err == nil {
-		return true
-	}
-	return false
+	return err == nil
 }

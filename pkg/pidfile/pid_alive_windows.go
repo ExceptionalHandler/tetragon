@@ -13,8 +13,5 @@ func isPidAlive(pid string) bool {
 	if err == nil {
 		_, err = os.FindProcess(int(int32pid))
 	}
-	if err != nil {
-		return false
-	}
-	return true
+	return err == nil
 }
