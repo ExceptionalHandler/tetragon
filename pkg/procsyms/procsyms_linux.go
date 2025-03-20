@@ -6,10 +6,19 @@ package procsyms
 import (
 	"debug/elf"
 	"fmt"
+	"sync"
 
 	"github.com/cilium/tetragon/pkg/logger"
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/prometheus/procfs"
+)
+
+var (
+	cache *lru.Cache[struct {
+		module string
+		offset uint64
+	}, string]
+	setCache sync.Once
 )
 
 // GetFnSymbol -- returns the FnSym for a given address and PID
