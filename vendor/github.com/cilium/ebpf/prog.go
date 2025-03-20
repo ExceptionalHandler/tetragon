@@ -14,7 +14,6 @@ import (
 	"github.com/cilium/ebpf/asm"
 	"github.com/cilium/ebpf/btf"
 	"github.com/cilium/ebpf/internal"
-	"github.com/cilium/ebpf/internal/errno"
 	"github.com/cilium/ebpf/internal/kallsyms"
 	"github.com/cilium/ebpf/internal/linux"
 	"github.com/cilium/ebpf/internal/platform"
@@ -56,6 +55,12 @@ const minVerifierLogSize = 64 * 1024
 // will accept before returning EINVAL. May be increased to MaxUint32 in the
 // future, but avoid the unnecessary EINVAL for now.
 const maxVerifierLogSize = math.MaxUint32 >> 2
+
+// maxVerifierAttempts is the maximum number of times the verifier will retry
+// loading a program with a growing log buffer before giving up. Since we double
+// the log size on every attempt, this is the absolute maximum number of
+// attempts before the buffer reaches [maxVerifierLogSize].
+const maxVerifierAttempts = 30
 
 // ProgramOptions control loading a program into the kernel.
 type ProgramOptions struct {
@@ -273,7 +278,7 @@ func newProgramWithOptions(spec *ProgramSpec, opts ProgramOptions) (*Program, er
 	// macro for kprobe-type programs.
 	// Overwrite Kprobe program version if set to zero or the magic version constant.
 	kv := spec.KernelVersion
-	if runtime.GOOS == "linux" && spec.Type == Kprobe && (kv == 0 || kv == internal.MagicKernelVersion) {
+	if spec.Type == Kprobe && (kv == 0 || kv == internal.MagicKernelVersion) {
 		v, err := linux.KernelVersion()
 		if err != nil {
 			return nil, fmt.Errorf("detecting kernel version: %w", err)
@@ -419,59 +424,44 @@ func newProgramWithOptions(spec *ProgramSpec, opts ProgramOptions) (*Program, er
 		return nil, fmt.Errorf("log level: %w", internal.ErrNotSupportedOnOS)
 	}
 
-	// The caller requested a specific verifier log level. Set up the log buffer
-	// so that there is a chance of loading the program in a single shot.
-	logSize := internal.Between(opts.LogSizeStart, minVerifierLogSize, maxVerifierLogSize)
 	var logBuf []byte
-	if !opts.LogDisabled && opts.LogLevel != 0 {
-		logBuf = make([]byte, logSize)
-		attr.LogLevel = opts.LogLevel
-		attr.LogSize = uint32(len(logBuf))
-		attr.LogBuf = sys.SlicePointer(logBuf)
-	}
-
-	for {
-		var fd *sys.FD
+	var fd *sys.FD
+	if opts.LogDisabled {
+		// Loading with logging disabled should never retry.
 		fd, err = sys.ProgLoad(attr)
 		if err == nil {
-			return &Program{sys.ByteSliceToString(logBuf), fd, spec.Name, "", spec.Type}, nil
+			return &Program{"", fd, spec.Name, "", spec.Type}, nil
+		}
+	} else {
+		// Only specify log size if log level is also specified. Setting size
+		// without level results in EINVAL. Level will be bumped to LogLevelBranch
+		// if the first load fails.
+		if opts.LogLevel != 0 {
+			attr.LogLevel = opts.LogLevel
+			attr.LogSize = internal.Between(opts.LogSizeStart, minVerifierLogSize, maxVerifierLogSize)
 		}
 
-		if opts.LogDisabled {
-			break
+		attempts := 1
+		for {
+			if attr.LogLevel != 0 {
+				logBuf = make([]byte, attr.LogSize)
+				attr.LogBuf = sys.SlicePointer(logBuf)
+			}
+
+			fd, err = sys.ProgLoad(attr)
+			if err == nil {
+				return &Program{unix.ByteSliceToString(logBuf), fd, spec.Name, "", spec.Type}, nil
+			}
+
+			if !retryLogAttrs(attr, opts.LogSizeStart, err) {
+				break
+			}
+
+			if attempts >= maxVerifierAttempts {
+				return nil, fmt.Errorf("load program: %w (bug: hit %d verifier attempts)", err, maxVerifierAttempts)
+			}
+			attempts++
 		}
-
-		if attr.LogTrueSize != 0 && attr.LogSize >= attr.LogTrueSize {
-			// The log buffer already has the correct size.
-			break
-		}
-
-		if attr.LogSize != 0 && !errors.Is(err, errno.ENOSPC) {
-			// Logging is enabled and the error is not ENOSPC, so we can infer
-			// that the log buffer is large enough.
-			break
-		}
-
-		if attr.LogLevel == 0 {
-			// Logging is not enabled but loading the program failed. Enable
-			// basic logging.
-			attr.LogLevel = LogLevelBranch
-		}
-
-		// Make an educated guess how large the buffer should be by multiplying.
-		// Ensure the size doesn't overflow.
-		const factor = 2
-		logSize = internal.Between(logSize, minVerifierLogSize, maxVerifierLogSize/factor)
-		logSize *= factor
-
-		if attr.LogTrueSize != 0 {
-			// The kernel has given us a hint how large the log buffer has to be.
-			logSize = attr.LogTrueSize
-		}
-
-		logBuf = make([]byte, logSize)
-		attr.LogSize = logSize
-		attr.LogBuf = sys.SlicePointer(logBuf)
 	}
 
 	end := bytes.IndexByte(logBuf, 0)
@@ -481,7 +471,7 @@ func newProgramWithOptions(spec *ProgramSpec, opts ProgramOptions) (*Program, er
 
 	tail := logBuf[max(end-256, 0):end]
 	switch {
-	case errors.Is(err, errno.EPERM):
+	case errors.Is(err, unix.EPERM):
 		if len(logBuf) > 0 && logBuf[0] == 0 {
 			// EPERM due to RLIMIT_MEMLOCK happens before the verifier, so we can
 			// check that the log is empty to reduce false positives.
@@ -503,7 +493,7 @@ func newProgramWithOptions(spec *ProgramSpec, opts ProgramOptions) (*Program, er
 			break
 		}
 
-	case errors.Is(err, errno.EACCES):
+	case errors.Is(err, unix.EACCES):
 		if bytes.Contains(tail, coreBadLoad) {
 			err = errBadRelocation
 			break
@@ -511,7 +501,7 @@ func newProgramWithOptions(spec *ProgramSpec, opts ProgramOptions) (*Program, er
 	}
 
 	// hasFunctionReferences may be expensive, so check it last.
-	if (errors.Is(err, errno.EINVAL) || errors.Is(err, errno.EPERM)) &&
+	if (errors.Is(err, unix.EINVAL) || errors.Is(err, unix.EPERM)) &&
 		hasFunctionReferences(spec.Instructions) {
 		if err := haveBPFToBPFCalls(); err != nil {
 			return nil, fmt.Errorf("load program: %w", err)
@@ -521,18 +511,56 @@ func newProgramWithOptions(spec *ProgramSpec, opts ProgramOptions) (*Program, er
 	return nil, internal.ErrorWithLog("load program", err, logBuf)
 }
 
+func retryLogAttrs(attr *sys.ProgLoadAttr, startSize uint32, err error) bool {
+	if attr.LogSize == maxVerifierLogSize {
+		// Maximum buffer size reached, don't grow or retry.
+		return false
+	}
+
+	// ENOSPC means the log was enabled on the previous iteration, so we only
+	// need to grow the buffer.
+	if errors.Is(err, unix.ENOSPC) {
+		if attr.LogTrueSize != 0 {
+			// Kernel supports LogTrueSize and previous iteration undershot the buffer
+			// size. Try again with the given true size.
+			attr.LogSize = attr.LogTrueSize
+			return true
+		}
+
+		// Ensure the size doesn't overflow.
+		const factor = 2
+		if attr.LogSize >= maxVerifierLogSize/factor {
+			attr.LogSize = maxVerifierLogSize
+			return true
+		}
+
+		// Make an educated guess how large the buffer should be by multiplying. Due
+		// to int division, this rounds down odd sizes.
+		attr.LogSize = internal.Between(attr.LogSize, minVerifierLogSize, maxVerifierLogSize/factor)
+		attr.LogSize *= factor
+
+		return true
+	}
+
+	if attr.LogLevel == 0 {
+		// Loading the program failed, it wasn't a buffer-related error, and the log
+		// was disabled the previous iteration. Enable basic logging and retry.
+		attr.LogLevel = LogLevelBranch
+		attr.LogSize = internal.Between(startSize, minVerifierLogSize, maxVerifierLogSize)
+		return true
+	}
+
+	// Loading the program failed for a reason other than buffer size and the log
+	// was already enabled the previous iteration. Don't retry.
+	return false
+}
+
 // NewProgramFromFD creates a program from a raw fd.
 //
 // You should not use fd after calling this function.
 //
 // Requires at least Linux 4.10. Returns an error on Windows.
 func NewProgramFromFD(fd int) (*Program, error) {
-	if runtime.GOOS == "windows" {
-		// Obtaining an fd that is compatible with this function requires calling
-		// into the efW runtime.
-		return nil, fmt.Errorf("new program from fd: %w", internal.ErrNotSupportedOnOS)
-	}
-
 	f, err := sys.NewFD(fd)
 	if err != nil {
 		return nil, err
@@ -589,10 +617,6 @@ func (p *Program) Info() (*ProgramInfo, error) {
 // Returns ErrNotSupported if the kernel has no BTF support, or if there is no
 // BTF associated with the program.
 func (p *Program) Handle() (*btf.Handle, error) {
-	if runtime.GOOS == "windows" {
-		return nil, fmt.Errorf("map handle: %w", internal.ErrNotSupportedOnOS)
-	}
-
 	info, err := p.Info()
 	if err != nil {
 		return nil, err
@@ -807,16 +831,16 @@ var haveProgRun = internal.NewFeatureTest("BPF_PROG_RUN", func() error {
 
 	err = sys.ProgRun(&attr)
 	switch {
-	case errors.Is(err, errno.EINVAL):
+	case errors.Is(err, unix.EINVAL):
 		// Check for EINVAL specifically, rather than err != nil since we
 		// otherwise misdetect due to insufficient permissions.
 		return internal.ErrNotSupported
 
-	case errors.Is(err, errno.EINTR):
+	case errors.Is(err, unix.EINTR):
 		// We know that PROG_TEST_RUN is supported if we get EINTR.
 		return nil
 
-	case errors.Is(err, errno.ENOTSUPP):
+	case errors.Is(err, sys.ENOTSUPP):
 		// The first PROG_TEST_RUN patches shipped in 4.12 didn't include
 		// a test runner for SocketFilter. ENOTSUPP means PROG_TEST_RUN is
 		// supported, but not for the program type used in the probe.
@@ -871,7 +895,7 @@ retry:
 			break retry
 		}
 
-		if errors.Is(err, errno.EINTR) {
+		if errors.Is(err, unix.EINTR) {
 			if attr.Repeat <= 1 {
 				// Older kernels check whether enough repetitions have been
 				// executed only after checking for pending signals.
@@ -894,7 +918,7 @@ retry:
 			continue retry
 		}
 
-		if errors.Is(err, errno.ENOTSUPP) {
+		if errors.Is(err, sys.ENOTSUPP) {
 			return 0, 0, fmt.Errorf("kernel doesn't support running %s: %w", p.Type(), ErrNotSupported)
 		}
 

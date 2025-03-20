@@ -146,6 +146,11 @@ func loadPinnedRawLink(fileName string, opts *ebpf.LoadPinOptions) (*RawLink, er
 
 func (l *RawLink) isLink() {}
 
+// FD returns the raw file descriptor.
+func (l *RawLink) FD() int {
+	return l.fd.Int()
+}
+
 // Close breaks the link.
 //
 // Use Pin if you want to make the link persistent.

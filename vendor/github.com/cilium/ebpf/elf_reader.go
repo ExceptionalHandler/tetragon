@@ -123,7 +123,7 @@ func LoadCollectionSpecFromReader(rd io.ReaderAt) (*CollectionSpec, error) {
 		}
 	}
 
-	license, err := loadSectionAsString(licenseSection)
+	license, err := loadLicense(licenseSection)
 	if err != nil {
 		return nil, fmt.Errorf("load license: %w", err)
 	}
@@ -210,7 +210,7 @@ func LoadCollectionSpecFromReader(rd io.ReaderAt) (*CollectionSpec, error) {
 	}, nil
 }
 
-func loadSectionAsString(sec *elf.Section) (string, error) {
+func loadLicense(sec *elf.Section) (string, error) {
 	if sec == nil {
 		return "", nil
 	}

@@ -6,12 +6,11 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"runtime"
 
 	"github.com/cilium/ebpf/internal"
-	"github.com/cilium/ebpf/internal/errno"
 	"github.com/cilium/ebpf/internal/platform"
 	"github.com/cilium/ebpf/internal/sys"
+	"github.com/cilium/ebpf/internal/unix"
 )
 
 // Handle is a reference to BTF loaded into the kernel.
@@ -74,7 +73,7 @@ func NewHandleFromRawBTF(btf []byte) (*Handle, error) {
 			break
 		}
 
-		if attr.BtfLogSize != 0 && !errors.Is(err, errno.ENOSPC) {
+		if attr.BtfLogSize != 0 && !errors.Is(err, unix.ENOSPC) {
 			// Up until at least kernel 6.0, the BTF verifier does not return ENOSPC
 			// if there are other verification errors. ENOSPC is only returned when
 			// the BTF blob is correct, a log was requested, and the provided buffer
@@ -141,10 +140,6 @@ func NewHandleFromID(id ID) (*Handle, error) {
 // base must contain type information for vmlinux if the handle is for
 // a kernel module. It may be nil otherwise.
 func (h *Handle) Spec(base *Spec) (*Spec, error) {
-	if runtime.GOOS != "linux" {
-		return nil, fmt.Errorf("btf: handle: %w", internal.ErrNotSupportedOnOS)
-	}
-
 	var btfInfo sys.BtfInfo
 	btfBuffer := make([]byte, h.size)
 	btfInfo.Btf = sys.SlicePointer(btfBuffer)
@@ -179,10 +174,6 @@ func (h *Handle) FD() int {
 
 // Info returns metadata about the handle.
 func (h *Handle) Info() (*HandleInfo, error) {
-	if runtime.GOOS != "linux" {
-		return nil, fmt.Errorf("btf: handle: %w", internal.ErrNotSupportedOnOS)
-	}
-
 	return newHandleInfoFromFD(h.fd)
 }
 
@@ -231,7 +222,7 @@ func newHandleInfoFromFD(fd *sys.FD) (*HandleInfo, error) {
 
 	return &HandleInfo{
 		ID:       ID(btfInfo.Id),
-		Name:     sys.ByteSliceToString(nameBuffer),
+		Name:     unix.ByteSliceToString(nameBuffer),
 		IsKernel: btfInfo.KernelBtf != 0,
 		size:     btfSize,
 	}, nil

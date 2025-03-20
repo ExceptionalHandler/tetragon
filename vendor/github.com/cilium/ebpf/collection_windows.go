@@ -132,15 +132,5 @@ func loadCollectionFromNativeImage(file string) (_ *Collection, err error) {
 		programs[program.name] = program
 	}
 
-	if err != nil {
-		for _, m := range maps {
-			_ = m.Close()
-		}
-		for _, p := range programs {
-			_ = p.Close()
-		}
-		return nil, err
-	}
-
 	return &Collection{programs, maps, nil}, nil
 }

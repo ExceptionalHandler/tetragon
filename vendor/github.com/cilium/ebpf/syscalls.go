@@ -10,7 +10,6 @@ import (
 
 	"github.com/cilium/ebpf/asm"
 	"github.com/cilium/ebpf/internal"
-	"github.com/cilium/ebpf/internal/errno"
 	"github.com/cilium/ebpf/internal/linux"
 	"github.com/cilium/ebpf/internal/platform"
 	"github.com/cilium/ebpf/internal/sys"
@@ -77,10 +76,10 @@ var haveNestedMaps = internal.NewFeatureTest("nested maps", func() error {
 		// Invalid file descriptor.
 		InnerMapFd: ^uint32(0),
 	})
-	if errors.Is(err, errno.EINVAL) {
+	if errors.Is(err, unix.EINVAL) {
 		return internal.ErrNotSupported
 	}
-	if errors.Is(err, errno.EBADF) {
+	if errors.Is(err, unix.EBADF) {
 		return nil
 	}
 	return err
@@ -158,19 +157,19 @@ func wrapMapError(err error) error {
 		return nil
 	}
 
-	if errors.Is(err, errno.ENOENT) {
+	if errors.Is(err, unix.ENOENT) {
 		return sysErrKeyNotExist
 	}
 
-	if errors.Is(err, errno.EEXIST) {
+	if errors.Is(err, unix.EEXIST) {
 		return sysErrKeyExist
 	}
 
-	if errors.Is(err, errno.ENOTSUPP) {
+	if errors.Is(err, sys.ENOTSUPP) {
 		return sysErrNotSupported
 	}
 
-	if errors.Is(err, errno.E2BIG) {
+	if errors.Is(err, unix.E2BIG) {
 		return fmt.Errorf("key too big for map: %w", err)
 	}
 
@@ -360,11 +359,11 @@ var haveProgramExtInfos = internal.NewFeatureTest("program ext_infos", func() er
 		ProgBtfFd:   math.MaxUint32,
 	})
 
-	if errors.Is(err, errno.EBADF) {
+	if errors.Is(err, unix.EBADF) {
 		return nil
 	}
 
-	if errors.Is(err, errno.E2BIG) {
+	if errors.Is(err, unix.E2BIG) {
 		return ErrNotSupported
 	}
 

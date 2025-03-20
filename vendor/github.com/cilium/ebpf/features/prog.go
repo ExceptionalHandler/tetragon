@@ -1,5 +1,3 @@
-//go:build linux
-
 package features
 
 import (
@@ -12,7 +10,6 @@ import (
 	"github.com/cilium/ebpf/asm"
 	"github.com/cilium/ebpf/btf"
 	"github.com/cilium/ebpf/internal"
-	"github.com/cilium/ebpf/internal/errno"
 	"github.com/cilium/ebpf/internal/sys"
 	"github.com/cilium/ebpf/internal/unix"
 )
@@ -48,7 +45,7 @@ func probeProgram(spec *ebpf.ProgramSpec) error {
 	// E2BIG occurs when ProgLoadAttr contains non-zero bytes past the end
 	// of the struct known by the running kernel, meaning the kernel is too old
 	// to support the given prog type.
-	case errors.Is(err, errno.EINVAL), errors.Is(err, errno.E2BIG):
+	case errors.Is(err, unix.EINVAL), errors.Is(err, unix.E2BIG):
 		err = ebpf.ErrNotSupported
 	}
 
@@ -114,7 +111,7 @@ var haveProgramTypeMatrix = internal.FeatureMatrix[ebpf.ProgramType]{
 				Type:    ebpf.StructOps,
 				License: "GPL",
 			})
-			if errors.Is(err, errno.ENOTSUPP) {
+			if errors.Is(err, sys.ENOTSUPP) {
 				// ENOTSUPP means the program type is at least known to the kernel.
 				return nil
 			}

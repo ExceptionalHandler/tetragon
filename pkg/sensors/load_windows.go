@@ -14,6 +14,7 @@ import (
 	"github.com/cilium/tetragon/pkg/logger"
 	"github.com/cilium/tetragon/pkg/option"
 	"github.com/cilium/tetragon/pkg/sensors/program"
+	"github.com/cilium/tetragon/pkg/tracingpolicy"
 
 	"github.com/sirupsen/logrus"
 )
@@ -47,10 +48,7 @@ func LoadConfig(bpfDir string, sens []*Sensor) error {
 }
 
 func (s *Sensor) policyDir() string {
-	if s.Namespace == "" {
-		return sanitize(s.Policy)
-	}
-	return fmt.Sprintf("%s:%s", s.Namespace, sanitize(s.Policy))
+	return tracingpolicy.PolicyDir(s.Namespace, s.Policy)
 }
 
 func (s *Sensor) createDirs(bpfDir string) {
@@ -133,7 +131,9 @@ func (s *Sensor) Load(bpfDir string) (err error) {
 	if err = s.FindPrograms(); err != nil {
 		return fmt.Errorf("tetragon, aborting could not find BPF programs: %w", err)
 	}
-
+	// Comparing with Linux, why are maps not loaded here ?
+	// In windows, we load collection directly and do not load specs.
+	// The collection loads maps for us.
 	for _, p := range s.Progs {
 		if p.LoadState.IsLoaded() {
 			l.WithField("prog", p.Name).Info("BPF prog is already loaded, incrementing reference count")
@@ -141,7 +141,7 @@ func (s *Sensor) Load(bpfDir string) (err error) {
 			continue
 		}
 
-		if err = observerLoadInstance(bpfDir, p); err != nil {
+		if err = observerLoadInstance(bpfDir, p, s.Maps); err != nil {
 			return err
 		}
 		p.LoadState.RefInc()
@@ -287,7 +287,7 @@ func mergeSensors(sensors []*Sensor) *Sensor {
 	}
 }
 
-func observerLoadInstance(bpfDir string, load *program.Program) error {
+func observerLoadInstance(bpfDir string, load *program.Program, maps []*program.Map) error {
 	version, _, err := kernels.GetKernelVersion(option.Config.KernelVersion, option.Config.ProcFS)
 	if err != nil {
 		return err
@@ -299,7 +299,7 @@ func observerLoadInstance(bpfDir string, load *program.Program) error {
 		"kern_version": version,
 	}).Debugf("observerLoadInstance %s %d", load.Name, version)
 
-	err = loadInstance(bpfDir, load, version, option.Config.Verbosity)
+	err = loadInstance(bpfDir, load, maps, version, option.Config.Verbosity)
 	if err != nil && load.ErrorFatal {
 		return fmt.Errorf("failed prog %s kern_version %d loadInstance: %w",
 			load.Name, version, err)
@@ -307,7 +307,7 @@ func observerLoadInstance(bpfDir string, load *program.Program) error {
 	return nil
 }
 
-func loadInstance(bpfDir string, load *program.Program, version, verbose int) error {
+func loadInstance(bpfDir string, load *program.Program, maps []*program.Map, version, verbose int) error {
 	// Check if the load.type is a standard program type. If so, use the standard loader.
 	loadFn, ok := standardTypes[load.Type]
 	if ok {
@@ -315,7 +315,7 @@ func loadInstance(bpfDir string, load *program.Program, version, verbose int) er
 			WithField("Type", load.Type).
 			WithField("Attach", load.Attach).
 			Debug("Loading BPF program")
-		return loadFn(bpfDir, load, verbose)
+		return loadFn(bpfDir, load, maps, verbose)
 	}
 
 	return fmt.Errorf("program %s has unregistered type '%s'", load.Label, load.Type)

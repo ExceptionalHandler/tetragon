@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"reflect"
-	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -17,9 +16,9 @@ import (
 	"github.com/cilium/ebpf/asm"
 	"github.com/cilium/ebpf/btf"
 	"github.com/cilium/ebpf/internal"
-	"github.com/cilium/ebpf/internal/errno"
 	"github.com/cilium/ebpf/internal/platform"
 	"github.com/cilium/ebpf/internal/sys"
+	"github.com/cilium/ebpf/internal/unix"
 )
 
 // The *Info structs expose metadata about a program or map. Most
@@ -72,7 +71,7 @@ func newMapInfoFromFd(fd *sys.FD) (*MapInfo, error) {
 	err1 := sys.ObjInfo(fd, &info)
 	// EINVAL means the kernel doesn't support BPF_OBJ_GET_INFO_BY_FD. Continue
 	// with fdinfo if that's the case.
-	if err1 != nil && !errors.Is(err1, errno.EINVAL) {
+	if err1 != nil && !errors.Is(err1, unix.EINVAL) {
 		return nil, fmt.Errorf("getting object info: %w", err1)
 	}
 
@@ -87,7 +86,7 @@ func newMapInfoFromFd(fd *sys.FD) (*MapInfo, error) {
 		info.ValueSize,
 		info.MaxEntries,
 		uint32(info.MapFlags),
-		sys.ByteSliceToString(info.Name[:]),
+		unix.ByteSliceToString(info.Name[:]),
 		MapID(info.Id),
 		btf.ID(info.BtfId),
 		info.MapExtra,
@@ -280,7 +279,7 @@ func newProgramInfoFromFd(fd *sys.FD) (*ProgramInfo, error) {
 		Type: typ,
 		id:   ProgramID(info.Id),
 		Tag:  hex.EncodeToString(info.Tag[:]),
-		Name: sys.ByteSliceToString(info.Name[:]),
+		Name: unix.ByteSliceToString(info.Name[:]),
 		btf:  btf.ID(info.BtfId),
 		stats: &programStats{
 			runtime:         time.Duration(info.RunTimeNs),
@@ -315,11 +314,6 @@ func newProgramInfoFromFd(fd *sys.FD) (*ProgramInfo, error) {
 		pi.maps = nil
 	}
 
-	if runtime.GOOS == "windows" {
-		if info.Tag == [8]uint8{} {
-			pi.Tag = ""
-		}
-	}
 	// createdByUID and NrMapIds were introduced in the same kernel version.
 	if pi.maps != nil && platform.IsLinux {
 		pi.createdByUID = info.CreatedByUid
@@ -569,7 +563,7 @@ func (pi *ProgramInfo) Instructions() (asm.Instructions, error) {
 		if err != nil {
 			// Getting a BTF handle requires CAP_SYS_ADMIN, if not available we get an -EPERM.
 			// Ignore it and fall back to instructions without metadata.
-			if !errors.Is(err, errno.EPERM) {
+			if !errors.Is(err, unix.EPERM) {
 				return nil, fmt.Errorf("unable to get BTF handle: %w", err)
 			}
 		}
@@ -853,11 +847,11 @@ var haveProgramInfoMapIDs = internal.NewFeatureTest("map IDs in program info", f
 		// any maps.
 		NrMapIds: 1,
 	})
-	if errors.Is(err, errno.EINVAL) {
+	if errors.Is(err, unix.EINVAL) {
 		// Most likely the syscall doesn't exist.
 		return internal.ErrNotSupported
 	}
-	if errors.Is(err, errno.E2BIG) {
+	if errors.Is(err, unix.E2BIG) {
 		// We've hit check_uarg_tail_zero on older kernels.
 		return internal.ErrNotSupported
 	}

@@ -4,6 +4,7 @@ package bpf
 
 import (
 	"fmt"
+	"sync/atomic"
 	"syscall"
 	"unsafe"
 
@@ -56,10 +57,9 @@ type _ebpf_operation_ring_buffer_map_async_query_reply struct {
 }
 
 type ebpf_ring_buffer_record struct {
-	locked    uint8
-	discarded uint8
-	length    uint32
-	data      [1]uint8
+	length      uint32
+	page_offset uint32
+	data        [1]uint8
 }
 
 type ProcessInfo struct {
@@ -79,13 +79,20 @@ var (
 )
 
 const (
-	ERROR_SUCCESS           = 0
-	ERROR_ACCESS_DENIED     = 5
-	ERROR_INVALID_PARAMETER = 87
-	FILE_DEVICE_NETWORK     = 0x12
-	FILE_ANY_ACCESS         = 0
-	METHOD_BUFFERED         = 0
-	INVALID_HANDLE_VALUE    = ^uintptr(0)
+	ERROR_SUCCESS                = 0
+	ERROR_ACCESS_DENIED          = 5
+	ERROR_INVALID_PARAMETER      = 87
+	FILE_DEVICE_NETWORK          = 0x12
+	FILE_ANY_ACCESS              = 0
+	METHOD_BUFFERED              = 0
+	INVALID_HANDLE_VALUE         = ^uintptr(0)
+	EBPF_RINGBUF_LOCK_BIT        = uint32(1 << 31)
+	EBPF_RINGBUF_DISCARD_BIT     = uint32(1 << 30)
+	ERR_RINGBUF_OFFSET_MISMATCH  = 1
+	ERR_RINGBUF_SUCCESS          = 0
+	ERR_RINGBUF_TRY_AGAIN        = 2
+	ERR_RINGBUF_RECORD_DISCARDED = 3
+	ERR_RINGBUF_UNKNOWN_ERROR    = 4
 )
 
 type WindowsRingBufReader struct {
@@ -110,6 +117,22 @@ func GetNewWindowsRingBufReader() *WindowsRingBufReader {
 
 func CTL_CODE(DeviceType, Function, Method, Access uint32) uint32 {
 	return (DeviceType << 16) | (Access << 14) | (Function << 2) | Method
+}
+
+func EbpfRingBufferRecordIsLocked(record *ebpf_ring_buffer_record) bool {
+	return atomic.LoadUint32(&record.length)&EBPF_RINGBUF_LOCK_BIT != 0
+}
+
+func EbpfRingBufferRecordIsDiscarded(record *ebpf_ring_buffer_record) bool {
+	return atomic.LoadUint32(&record.length)&EBPF_RINGBUF_DISCARD_BIT != 0
+}
+
+func EbpfRingBufferRecordLength(record *ebpf_ring_buffer_record) uint32 {
+	return (atomic.LoadUint32(&record.length)) & (uint32(^(EBPF_RINGBUF_LOCK_BIT | EBPF_RINGBUF_DISCARD_BIT)))
+}
+
+func EbpfRingBufferRecordTotalSize(record *ebpf_ring_buffer_record) uint32 {
+	return (EbpfRingBufferRecordLength(record) + uint32(unsafe.Offsetof(record.data)) + 7) & ^uint32(7)
 }
 
 func (reader *WindowsRingBufReader) invokeIoctl(request unsafe.Pointer, dwReqSize uint32, response unsafe.Pointer, dwRespSize uint32, overlapped unsafe.Pointer) error {
@@ -158,7 +181,6 @@ func (reader *WindowsRingBufReader) invokeIoctl(request unsafe.Pointer, dwReqSiz
 	if hDevice == INVALID_HANDLE_VALUE {
 		return fmt.Errorf("Erro Opening Device")
 	}
-
 	success, _, err := DeviceIoControl.Call(
 		uintptr(hDevice),
 		uintptr(CTL_CODE(FILE_DEVICE_NETWORK, 0x900, METHOD_BUFFERED, FILE_ANY_ACCESS)),
@@ -281,21 +303,27 @@ func (reader *WindowsRingBufReader) fetchNextOffsets() error {
 	return nil
 }
 
-func (reader *WindowsRingBufReader) GetNextProcess() (*ProcessInfo, error) {
+func (reader *WindowsRingBufReader) GetNextProcess() (*ProcessInfo, uint32) {
 	if reader.consumer_offset == reader.producer_offset {
 		err := reader.fetchNextOffsets()
 		if err != nil {
-			return nil, err
+			return nil, ERR_RINGBUF_UNKNOWN_ERROR
 		}
 	}
 	record := EbpfRingBufferNextRecord(reader.byteBuf, uint64(reader.ring_buffer_size), reader.consumer_offset, reader.producer_offset)
 	if record == nil {
-		return nil, fmt.Errorf("Offset Mismatch")
+		return nil, ERR_RINGBUF_OFFSET_MISMATCH
 	}
-	procInfo := (*ProcessInfo)(unsafe.Pointer(&(record.data)))
-
-	reader.consumer_offset += uint64(record.length)
+	if EbpfRingBufferRecordIsLocked(record) {
+		return nil, ERR_RINGBUF_TRY_AGAIN
+	}
+	reader.consumer_offset += uint64(EbpfRingBufferRecordTotalSize(record))
 	// This will be communicated in next ioctl
 	reader.currRequest.consumer_offset = reader.consumer_offset
-	return procInfo, nil
+	if !EbpfRingBufferRecordIsDiscarded(record) {
+		procInfo := (*ProcessInfo)(unsafe.Pointer(&(record.data)))
+		return procInfo, ERR_RINGBUF_SUCCESS
+
+	}
+	return nil, ERR_RINGBUF_RECORD_DISCARDED
 }

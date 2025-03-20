@@ -73,7 +73,6 @@ github.com/cilium/ebpf/features
 github.com/cilium/ebpf/internal
 github.com/cilium/ebpf/internal/efw
 github.com/cilium/ebpf/internal/epoll
-github.com/cilium/ebpf/internal/errno
 github.com/cilium/ebpf/internal/kallsyms
 github.com/cilium/ebpf/internal/kconfig
 github.com/cilium/ebpf/internal/linux

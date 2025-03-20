@@ -252,10 +252,13 @@ func (k *Observer) RunEvents(stopCtx context.Context, ready func()) error {
 
 		for stopCtx.Err() == nil {
 			var record Record
-			procInfo, err := reader.GetNextProcess()
-			if err != nil {
+			procInfo, errCode := reader.GetNextProcess()
+			if (errCode == bpf.ERR_RINGBUF_OFFSET_MISMATCH) || (errCode == bpf.ERR_RINGBUF_UNKNOWN_ERROR) {
 				k.log.WithField("NewError ", 0).WithError(err).Warn("Reading bpf events failed")
 				break
+			}
+			if (errCode == bpf.ERR_RINGBUF_RECORD_DISCARDED) || (errCode == bpf.ERR_RINGBUF_TRY_AGAIN) {
+				continue
 			}
 			if procInfo.Operation != 0 {
 				record, err = getExitRecordFromProcInfo(procInfo)

@@ -12,7 +12,6 @@ import (
 	pprofhttp "net/http/pprof"
 	"os"
 	"os/signal"
-	"path"
 	"path/filepath"
 	"runtime"
 	"runtime/pprof"
@@ -22,7 +21,6 @@ import (
 	"time"
 
 	"github.com/cilium/tetragon/api/v1/tetragon"
-	"github.com/cilium/tetragon/pkg/alignchecker"
 	"github.com/cilium/tetragon/pkg/bpf"
 	"github.com/cilium/tetragon/pkg/bugtool"
 	"github.com/cilium/tetragon/pkg/cgrouprate"
@@ -79,11 +77,6 @@ import (
 var (
 	log = logger.GetLogger()
 )
-
-func checkStructAlignments() error {
-	path := path.Join(option.Config.HubbleLib, "bpf_alignchecker.o")
-	return alignchecker.CheckStructAlignments(path)
-}
 
 func getExportFilters() ([]*tetragon.Filter, []*tetragon.Filter, error) {
 	allowList, err := filters.ParseFilterList(viper.GetString(option.KeyExportAllowlist), viper.GetBool(option.KeyEnablePidSetFilter))
@@ -278,10 +271,6 @@ func tetragonExecuteCtx(ctx context.Context, cancel context.CancelFunc, ready fu
 			log.Warn("Options --release-pinned-bpf and --keep-sensors-on-exit enabled together, we will remove sysfs instance early.")
 		}
 		log.Info("Not unloading sensors on exit")
-	}
-
-	if err := checkStructAlignments(); err != nil {
-		return fmt.Errorf("struct alignment checks failed: %w", err)
 	}
 
 	// Setup file system mounts

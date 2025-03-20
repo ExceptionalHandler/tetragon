@@ -15,6 +15,7 @@ import (
 	"github.com/cilium/tetragon/pkg/bpf"
 	"github.com/cilium/tetragon/pkg/logger"
 	"github.com/cilium/tetragon/pkg/sensors/unloader"
+	"golang.org/x/sys/windows"
 )
 
 // AttachFunc is the type for the various attachment functions. The function is
@@ -30,8 +31,14 @@ type LoadOpts struct {
 }
 
 var (
-	notSupportedWinErr = errors.New("not supported on windows")
+	notSupportedWinErr     = errors.New("not supported on windows")
+	programTypeProcessGUID = makeGUID(0x22ea7b37, 0x1043, 0x4d0d, [8]byte{0xb6, 0x0d, 0xca, 0xfa, 0x1c, 0x7b, 0x63, 0x8e})
+	attachTypeProcessGUID  = makeGUID(0x66e20687, 0x9805, 0x4458, [8]byte{0xa0, 0xdb, 0x38, 0xe2, 0x20, 0xd3, 0x16, 0x85})
 )
+
+func makeGUID(data1 uint32, data2 uint16, data3 uint16, data4 [8]byte) windows.GUID {
+	return windows.GUID{Data1: data1, Data2: data2, Data3: data3, Data4: data4}
+}
 
 func linkPinPath(bpfDir string, load *Program, extra ...string) string {
 	pinPath := filepath.Join(bpfDir, load.PinPath, "link")
@@ -77,10 +84,14 @@ func kprobeAttach(load *Program, prog *ebpf.Program, spec *ebpf.ProgramSpec,
 func windowsAttach(load *Program, prog *ebpf.Program, spec *ebpf.ProgramSpec,
 	symbol string, bpfDir string, extra ...string) (unloader.Unloader, error) {
 
+	attachType, err := ebpf.WindowsAttachTypeForGUID(attachTypeProcessGUID.String())
+	if err != nil {
+		return nil, err
+	}
+
 	link, err := link.AttachRawLink(link.RawLinkOptions{
 		Program: prog,
-		//ToDo: Fix This
-		// Attach:  ebpf.AttachWindowsProcess,
+		Attach:  attachType,
 	})
 	if err != nil {
 		return nil, err
@@ -182,7 +193,7 @@ func LoadKprobeProgram(bpfDir string, load *Program, maps []*Map, verbose int) e
 	return loadProgram(bpfDir, load, opts, verbose)
 }
 
-func LoadWindowsProgram(bpfDir string, load *Program, verbose int) error {
+func LoadWindowsProgram(bpfDir string, load *Program, maps []*Map, verbose int) error {
 	opts := &LoadOpts{
 		Attach: WindowsAttach(load, bpfDir),
 	}

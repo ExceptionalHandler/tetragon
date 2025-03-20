@@ -9,6 +9,7 @@ import (
 	"github.com/cilium/ebpf/internal/sys"
 )
 
+// AttachRawLink creates a raw link.
 func AttachRawLink(opts RawLinkOptions) (*RawLink, error) {
 	if opts.Target != 0 || opts.BTF != 0 || opts.Flags != 0 {
 		return nil, fmt.Errorf("specified option(s) %w", internal.ErrNotSupportedOnOS)
@@ -24,7 +25,12 @@ func AttachRawLink(opts RawLinkOptions) (*RawLink, error) {
 		return nil, fmt.Errorf("get attach type: %w", err)
 	}
 
-	raw, err := efw.EbpfProgramAttachFds(opts.Program.FD(), attachTypeGUID, nil, 0)
+	progFd := opts.Program.FD()
+	if progFd < 0 {
+		return nil, fmt.Errorf("invalid program: %s", sys.ErrClosedFd)
+	}
+
+	raw, err := efw.EbpfProgramAttachFds(progFd, attachTypeGUID, nil, 0)
 	if err != nil {
 		return nil, fmt.Errorf("attach link: %w", err)
 	}
