@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright Authors of Tetragon
 package cgroups
 
 import "bytes"
@@ -23,10 +25,19 @@ const (
 	 * But this should work also for non-systemd environments: where
 	 * only legacy or unified are available by default.
 	 */
-	CGROUP_UNDEF CgroupModeCode = iota
+	CGROUP_UNDEF   CgroupModeCode = iota
+	CGROUP_LEGACY  CgroupModeCode = 1
+	CGROUP_HYBRID  CgroupModeCode = 2
+	CGROUP_UNIFIED CgroupModeCode = 3
 )
 
 type DeploymentCode int
+
+type deploymentEnv struct {
+	id       DeploymentCode
+	str      string
+	endsWith string
+}
 
 const (
 	// Deployment modes

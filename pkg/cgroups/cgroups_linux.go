@@ -28,21 +28,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-type deploymentEnv struct {
-	id       DeploymentCode
-	str      string
-	endsWith string
-}
-
-const (
-	// Deployment modes
-	DEPLOY_UNKNOWN    DeploymentCode = iota
-	DEPLOY_K8S        DeploymentCode = 1  // K8s deployment
-	DEPLOY_CONTAINER  DeploymentCode = 2  // Container docker, podman, etc
-	DEPLOY_SD_SERVICE DeploymentCode = 10 // Systemd service
-	DEPLOY_SD_USER    DeploymentCode = 11 // Systemd user session
-)
-
 type CgroupController struct {
 	Id     uint32 // Hierarchy unique ID
 	Idx    uint32 // Cgroup SubSys index
@@ -106,16 +91,6 @@ func (code CgroupModeCode) String() string {
 		CGROUP_HYBRID:  "Hybrid mode (Cgroupv1 and Cgroupv2)",
 		CGROUP_UNIFIED: "Unified mode (Cgroupv2)",
 	}[code]
-}
-
-func (op DeploymentCode) String() string {
-	return [...]string{
-		DEPLOY_UNKNOWN:    "unknown",
-		DEPLOY_K8S:        "Kubernetes",
-		DEPLOY_CONTAINER:  "Container",
-		DEPLOY_SD_SERVICE: "systemd service",
-		DEPLOY_SD_USER:    "systemd user session",
-	}[op]
 }
 
 // DetectCgroupFSMagic() runs by default DetectCgroupMode()
