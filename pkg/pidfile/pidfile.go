@@ -36,7 +36,13 @@ func readPidFile() (uint64, error) {
 	pid := string(bytes.TrimSpace(data))
 	if runtime.GOOS != "windows" {
 		_, err = os.Stat(filepath.Join(option.Config.ProcFS, pid))
+	} else {
+		int32pid, err := strconv.ParseInt(pid, 0, 32)
+		if err == nil {
+			_, err = os.FindProcess(int(int32pid))
+		}
 	}
+
 	if err != nil {
 		return 0, ErrPidIsNotAlive
 	}
