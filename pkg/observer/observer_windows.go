@@ -213,7 +213,7 @@ func getExecRecordFromProcInfo(process_info *bpf.ProcessInfo, command_map *ebpf.
 	return record, nil
 }
 
-func (k *Observer) RunEvents(stopCtx context.Context, ready func()) error {
+func (observer *Observer) RunEvents(stopCtx context.Context, ready func()) error {
 	coll := bpf.GetExecCollection()
 	if coll == nil {
 		return fmt.Errorf("Exec Preloaded collection is nil")
@@ -227,16 +227,16 @@ func (k *Observer) RunEvents(stopCtx context.Context, ready func()) error {
 		return fmt.Errorf("Failed initing rinbuf reader", err)
 	}
 	// Inform caller that we're about to start processing events.
-	k.observerListeners(&readyapi.MsgTetragonReady{})
+	observer.observerListeners(&readyapi.MsgTetragonReady{})
 	ready()
 
 	// We spawn go routine to read and process perf events,
-	// connected with main app through eventsQueue channel.
-	eventsQueue := make(chan *Record, k.getRBQueueSize())
+	// connected with main app through winEventsQueue channel.
+	winEventsQueue := make(chan *Record, observer.getRBQueueSize())
 
 	// Listeners are ready and about to start reading from perf reader, tell
 	// user everything is ready.
-	k.log.Info("Listening for events...")
+	observer.log.Info("Listening for events...")
 
 	// Start reading records from the perf array. Reads until the reader is closed.
 	var wg sync.WaitGroup
@@ -254,7 +254,7 @@ func (k *Observer) RunEvents(stopCtx context.Context, ready func()) error {
 			var record Record
 			procInfo, errCode := reader.GetNextProcess()
 			if (errCode == bpf.ERR_RINGBUF_OFFSET_MISMATCH) || (errCode == bpf.ERR_RINGBUF_UNKNOWN_ERROR) {
-				k.log.WithField("NewError ", 0).WithError(err).Warn("Reading bpf events failed")
+				observer.log.WithField("NewError ", 0).WithError(err).Warn("Reading bpf events failed")
 				break
 			}
 			if (errCode == bpf.ERR_RINGBUF_RECORD_DISCARDED) || (errCode == bpf.ERR_RINGBUF_TRY_AGAIN) {
@@ -269,19 +269,18 @@ func (k *Observer) RunEvents(stopCtx context.Context, ready func()) error {
 				if stopCtx.Err() == nil {
 					RingbufErrors.Inc()
 					errorCnt := getCounterValue(RingbufErrors)
-					k.log.WithField("errors", errorCnt).WithError(err).Warn("Reading bpf events failed")
+					observer.log.WithField("errors", errorCnt).WithError(err).Warn("Reading bpf events failed")
 				}
 			} else {
 				if len(record.RawSample) > 0 {
 					select {
-					case eventsQueue <- &record:
+					case winEventsQueue <- &record:
 					default:
-						// eventsQueue channel is full, drop the event
+						// drop the event, since channel is full
 						queueLost.Inc()
 					}
 					RingbufReceived.Inc()
 				}
-
 				if record.LostSamples > 0 {
 					RingbufLost.Add(float64(record.LostSamples))
 				}
@@ -289,18 +288,18 @@ func (k *Observer) RunEvents(stopCtx context.Context, ready func()) error {
 		}
 	}()
 
-	// Start processing records from perf.
+	// Start processing records from ringbuffer
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		for {
 			select {
-			case event := <-eventsQueue:
-				k.receiveEvent(event.RawSample)
+			case winEvent := <-winEventsQueue:
+				observer.receiveEvent(winEvent.RawSample)
 				queueReceived.Inc()
 			case <-stopCtx.Done():
-				k.log.WithError(stopCtx.Err()).Infof("Listening for events completed.")
-				k.log.Debugf("Unprocessed events in RB queue: %d", len(eventsQueue))
+				observer.log.WithError(stopCtx.Err()).Infof("Listening for events completed.")
+				observer.log.Debugf("Unprocessed events in RB queue: %d", len(winEventsQueue))
 				return
 			}
 		}
