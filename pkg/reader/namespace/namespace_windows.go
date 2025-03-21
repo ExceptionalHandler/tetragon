@@ -4,9 +4,7 @@
 package namespace
 
 import (
-	"fmt"
 	"os"
-	"sync"
 
 	"github.com/cilium/tetragon/api/v1/tetragon"
 	"github.com/cilium/tetragon/pkg/api/processapi"
@@ -17,31 +15,8 @@ type hostNamespaces struct {
 	err error
 }
 
-var (
-	// listNamespaces is the order how we read namespaces from /proc
-	listNamespaces = [10]string{"uts", "ipc", "mnt", "pid", "pid_for_children", "net", "time", "time_for_children", "cgroup", "user"}
-
-	hostNs     hostNamespaces
-	hostNsOnce sync.Once
-
-	// If kernel supports time namespace
-	TimeNsSupport bool
-)
-
-func GetPidNsInode(pid uint32, nsStr string) (uint32, error) {
-	return 0, fmt.Errorf("Not supported on Windows ")
-}
-
 func GetMyPidG() uint32 {
 	return uint32(os.Getpid())
-}
-
-func GetHostNsInode(nsStr string) (uint32, error) {
-	return GetPidNsInode(1, nsStr)
-}
-
-func GetSelfNsInode(nsStr string) (uint32, error) {
-	return GetPidNsInode(uint32(GetMyPidG()), nsStr)
 }
 
 func IsMsgNsInHostMntUser(ns *processapi.MsgNamespaces) (bool, error) {
@@ -97,12 +72,6 @@ func getConstNamespaces() (*tetragon.Namespaces, error) {
 
 	return retVal, nil
 }
-
-func GetCurrentNamespace() *tetragon.Namespaces {
-	ns, _ := getConstNamespaces()
-	return ns
-}
-
 func GetMsgNamespaces(ns processapi.MsgNamespaces) (*tetragon.Namespaces, error) {
 	return getConstNamespaces()
 }
