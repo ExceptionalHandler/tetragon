@@ -1,6 +1,8 @@
 package tracing
 
+import "errors"
+
 func createLoaderEvents() error {
 
-	return nil
+	return errors.New("not supported on windows")
 }
