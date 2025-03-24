@@ -5,17 +5,6 @@ package procsyms
 
 import (
 	"fmt"
-	"sync"
-
-	lru "github.com/hashicorp/golang-lru/v2"
-)
-
-var (
-	cache *lru.Cache[struct {
-		module string
-		offset uint64
-	}, string]
-	setCache sync.Once
 )
 
 // FnSym is a function location (function name, module path + offset)
