@@ -181,11 +181,16 @@ func getCWD(pid uint32) (string, uint32) {
 }
 
 func updateExecveMapStats(procs int64) {
+	//ToDo: WIP
+	// Currently we do not share the infor gathered in usermode with execve map in kernel in Windows,
+	// This method is currently stubbed out but will be implemented
 
 }
 
 func writeExecveMap(procs []procs) {
-
+	//ToDo: WIP
+	// Currently we do not share the infor gathered in usermode with execve map in kernel in Windows,
+	// This method is currently stubbed out but will be implemented
 }
 
 func getProcessParamsFromHandle64(handle windows.Handle) (RtlUserProcessParams64, error) {
