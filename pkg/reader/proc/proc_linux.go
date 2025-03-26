@@ -13,10 +13,7 @@ import (
 
 	"github.com/cilium/tetragon/pkg/logger"
 	"github.com/cilium/tetragon/pkg/option"
-<<<<<<< HEAD
-=======
 	"github.com/sirupsen/logrus"
->>>>>>> 82338f6b9 (tetragon/windows: Port reader/proc package on Windows)
 )
 
 // The /proc/PID/stat file consists of a single line of space-separated strings, where
