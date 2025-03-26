@@ -86,13 +86,10 @@ func registerHealthMetrics(group metrics.Group) {
 	exporter.RegisterMetrics(group)
 	// cgrup rate metrics
 	cgroupratemetrics.RegisterMetrics(group)
-<<<<<<< HEAD
-=======
 
 	// extended metrics, Linux only
 	registerHealthMetricsEx(group)
 
->>>>>>> 4c6a99b72 (tetragon/windows: Compile pkg/metricsconfig package on Windows)
 	// policy metrics
 	group.MustRegister(policymetrics.NewPolicyCollector())
 	// gRPC metrics
