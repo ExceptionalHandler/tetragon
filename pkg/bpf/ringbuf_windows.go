@@ -14,7 +14,6 @@ import (
 var (
 	ModuleNt       = windows.NewLazySystemDLL("ntdll.dll")
 	ModuleKernel32 = windows.NewLazySystemDLL("kernel32.dll")
-	EbpfApi        = windows.NewLazyDLL("ebpfapi.dll")
 
 	NtQuerySystemInformation = ModuleNt.NewProc("NtQuerySystemInformation")
 	CreateFileW              = ModuleKernel32.NewProc("CreateFileW")
