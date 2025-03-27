@@ -15,8 +15,6 @@ import (
 )
 
 var (
-	// Path to where debugfs is mounted
-	debugFSRoot = "/sys/kernel/debug"
 	// Path to where cgroup2 is mounted
 	cgroup2Root = defaults.Cgroup2Dir
 )
