@@ -1,6 +1,8 @@
 package constants
 
 import (
+	"errors"
+
 	"golang.org/x/sys/windows"
 )
 
@@ -18,4 +20,8 @@ const (
 	CGROUP2_SUPER_MAGIC  = 0x63677270
 	BPF_STATS_RUN_TIME   = 0
 	S_IFMT               = 0xf000
+)
+
+var (
+	ErrWindowsNotSupported = errors.New("This functionality is not supported on windows")
 )
