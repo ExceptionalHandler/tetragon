@@ -20,5 +20,5 @@ func UpdateElementFromPointers(fd int, structPtr, sizeOfStruct uintptr) error {
 	if ret != 0 || err != nil {
 		return fmt.Errorf("Unable to update element for map with file descriptor %d: %s", fd, err)
 	}
-	return fmt.Errorf("not supported on windows")
+	return nil
 }

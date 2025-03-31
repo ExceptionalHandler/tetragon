@@ -10,6 +10,9 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/cilium/tetragon/pkg/logger"
+	"github.com/cilium/tetragon/pkg/option"
 )
 
 // The /proc/PID/stat file consists of a single line of space-separated strings, where
@@ -139,4 +142,55 @@ func GetSelfPid(procfs string) (uint64, error) {
 	}
 
 	return strconv.ParseUint(filepath.Base(str), 10, 32)
+}
+
+// LogCurrentLSMContext() Logs the current LSM security context.
+func LogCurrentSecurityContext() {
+	lsms := map[string]string{
+		"selinux":  "",
+		"apparmor": "",
+		"smack":    "",
+	}
+
+	logLSM := false
+	for k := range lsms {
+		path := ""
+		if k == "selinux" {
+			path = filepath.Join(option.Config.ProcFS, "/self/attr/current")
+		} else {
+			path = filepath.Join(option.Config.ProcFS, fmt.Sprintf("/self/attr/%s/current", k))
+		}
+		data, err := os.ReadFile(path)
+		if err == nil && len(data) > 0 {
+			lsms[k] = strings.TrimSpace(string(data))
+			logLSM = true
+		}
+	}
+
+	lockdown := ""
+	data, err := os.ReadFile("/sys/kernel/security/lockdown")
+	if err == nil && len(data) > 0 {
+		values := strings.TrimSpace(string(data))
+		i := strings.Index(values, "[")
+		j := strings.Index(values, "]")
+		if i >= 0 && j > i {
+			lockdown = values[i+1 : j]
+			logLSM = true
+		}
+		if lockdown == "confidentiality" {
+			logger.GetLogger().Warn("Kernel Lockdown is in 'confidentiality' mode, Tetragon will fail to load BPF programs")
+		}
+	}
+
+	if logLSM {
+		/* Now log all LSM security so we can debug later in
+		 * case some operations fail.
+		 */
+		logger.GetLogger().WithFields(logrus.Fields{
+			"SELinux":  lsms["selinux"],
+			"AppArmor": lsms["apparmor"],
+			"Smack":    lsms["smack"],
+			"Lockdown": lockdown,
+		}).Info("Tetragon current security context")
+	}
 }

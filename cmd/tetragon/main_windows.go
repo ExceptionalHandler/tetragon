@@ -40,7 +40,6 @@ import (
 	"github.com/cilium/tetragon/pkg/pidfile"
 	"github.com/cilium/tetragon/pkg/process"
 	"github.com/cilium/tetragon/pkg/ratelimit"
-	"github.com/cilium/tetragon/pkg/reader/proc"
 	"github.com/cilium/tetragon/pkg/rthooks"
 	"github.com/cilium/tetragon/pkg/sensors/base"
 	"github.com/cilium/tetragon/pkg/sensors/exec/procevents"
@@ -229,9 +228,6 @@ func tetragonExecuteCtx(ctx context.Context, cancel context.CancelFunc, ready fu
 
 	// Create run dir early
 	os.MkdirAll(defaults.DefaultRunDir, 0755)
-
-	// Log early security context in case something fails
-	proc.LogCurrentSecurityContext()
 
 	// When an instance terminates or restarts it may cleanup bpf programs,
 	// having a check here to see if another instance is already running.
