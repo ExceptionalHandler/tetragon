@@ -7,7 +7,7 @@ require (
 	github.com/alecthomas/kong v1.9.0
 	github.com/bombsimon/logrusr/v4 v4.1.0
 	github.com/cilium/cilium v1.17.2
-	github.com/cilium/ebpf v0.17.3
+	github.com/cilium/ebpf v0.18.0
 	github.com/cilium/little-vm-helper v0.0.23
 	github.com/cilium/lumberjack/v2 v2.4.1
 	github.com/cilium/tetragon/api v0.0.0-00010101000000-000000000000
@@ -171,7 +171,6 @@ require (
 )
 
 replace (
-	github.com/cilium/ebpf => ../ebpf
 	// Use local version of API
 	github.com/cilium/tetragon/api => ./api
 	github.com/cilium/tetragon/pkg/k8s => ./pkg/k8s
