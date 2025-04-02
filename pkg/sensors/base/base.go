@@ -5,7 +5,6 @@ package base
 
 import (
 	"log"
-	"runtime"
 	"sync"
 	"testing"
 	"unsafe"
@@ -28,14 +27,6 @@ const (
 
 var (
 	basePolicy = "__base__"
-
-	CreateProcess = program.Builder(
-		"process_monitor.sys",
-		"process",
-		"ProcessMonitor",
-		"process::program",
-		"windows",
-	).SetPolicy(basePolicy)
 
 	Execve = program.Builder(
 		config.ExecObj(),
@@ -88,10 +79,6 @@ var (
 	MatchBinariesSetMap = program.MapBuilder(mbset.MapName, Execve)
 
 	ErrMetricsMap = program.MapBuilder(errmetrics.MapName, Execve)
-
-	ProcessRingBufMap = program.MapBuilder("process_ringbuf", CreateProcess)
-	ProcessPidMap     = program.MapBuilder("process_map", CreateProcess)
-	ProcessCmdMap     = program.MapBuilder("command_map", CreateProcess)
 )
 
 func parseExecveMapSize(str string) (int, error) {
@@ -166,48 +153,6 @@ func GetExecveMapStats() *program.Map {
 
 func GetTetragonConfMap() *program.Map {
 	return TetragonConfMap
-}
-
-func GetDefaultPrograms() []*program.Program {
-	var progs []*program.Program
-	if runtime.GOOS == "windows" {
-		progs = []*program.Program{
-			CreateProcess,
-		}
-	} else {
-		progs = []*program.Program{
-			Exit,
-			Fork,
-			Execve,
-			ExecveBprmCommit,
-		}
-	}
-	return progs
-}
-
-func GetDefaultMaps() []*program.Map {
-	var maps []*program.Map
-	if runtime.GOOS == "windows" {
-		maps = []*program.Map{
-			ProcessRingBufMap,
-			ProcessCmdMap,
-			ProcessPidMap,
-		}
-	} else {
-		maps = []*program.Map{
-			ExecveMap,
-			ExecveJoinMap,
-			ExecveStats,
-			ExecveJoinMapStats,
-			ExecveTailCallsMap,
-			TCPMonMap,
-			TetragonConfMap,
-			StatsMap,
-			MatchBinariesSetMap,
-			ErrMetricsMap,
-		}
-	}
-	return maps
 }
 
 func initBaseSensor() *sensors.Sensor {

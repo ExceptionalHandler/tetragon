@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"unsafe"
 
+	"github.com/cilium/tetragon/pkg/logger"
 	"golang.org/x/sys/windows"
 )
 
@@ -22,6 +23,7 @@ var (
 	CreateEventW             = ModuleKernel32.NewProc("CreateEventW")
 	ResetEvent               = ModuleKernel32.NewProc("ResetEvent")
 	GetHandleFromFd          = EbpfApi.NewProc("ebpf_get_handle_from_fd")
+	log                      = logger.GetLogger()
 )
 
 type _ebpf_operation_header struct {
@@ -92,6 +94,8 @@ const (
 	ERR_RINGBUF_TRY_AGAIN        = 2
 	ERR_RINGBUF_RECORD_DISCARDED = 3
 	ERR_RINGBUF_UNKNOWN_ERROR    = 4
+
+	EBPF_IO_DEVICE = `\\.\EbpfIoDevice`
 )
 
 type WindowsRingBufReader struct {
@@ -147,7 +151,7 @@ func (reader *WindowsRingBufReader) invokeIoctl(request unsafe.Pointer, dwReqSiz
 	if overlapped == nil {
 		if reader.hSync == INVALID_HANDLE_VALUE {
 			reader.hSync, _, err = CreateFileW.Call(
-				uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(`\\.\EbpfIoDevice`))),
+				uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(EBPF_IO_DEVICE))),
 				uintptr(syscall.GENERIC_READ|syscall.GENERIC_WRITE),
 				0,
 				0,
@@ -163,7 +167,7 @@ func (reader *WindowsRingBufReader) invokeIoctl(request unsafe.Pointer, dwReqSiz
 	} else {
 		if reader.hASync == INVALID_HANDLE_VALUE {
 			reader.hASync, _, err = CreateFileW.Call(
-				uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(`\\.\EbpfIoDevice`))),
+				uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(EBPF_IO_DEVICE))),
 				uintptr(syscall.GENERIC_READ|syscall.GENERIC_WRITE),
 				0,
 				0,
