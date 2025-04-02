@@ -56,8 +56,8 @@ func flushKernelSpec() {
 	return
 }
 
-func (s *Sensor) loadMaps(bpfDir string, loadedMaps []*program.Map) error {
-	return nil
+func (s *Sensor) preLoadMaps(bpfDir string, loadedMaps []*program.Map) ([]*program.Map, error) {
+	return nil, nil
 }
 
 func getCachedBTFFile() string {

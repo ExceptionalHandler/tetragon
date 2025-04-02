@@ -31,14 +31,14 @@ func (s *Sensor) setMapPinPath(m *program.Map) {
 	}
 }
 
-func (s *Sensor) loadMaps(bpfDir string, loadedMaps []*program.Map) error {
+func (s *Sensor) preLoadMaps(bpfDir string, loadedMaps []*program.Map) ([]*program.Map, error) {
 	for _, m := range s.Maps {
 		if err := s.loadMap(bpfDir, m); err != nil {
-			return fmt.Errorf("tetragon, aborting could not load sensor BPF maps: %w", err)
+			return loadedMaps, fmt.Errorf("tetragon, aborting could not load sensor BPF maps: %w", err)
 		}
 		loadedMaps = append(loadedMaps, m)
 	}
-	return nil
+	return loadedMaps, nil
 }
 
 // loadMap loads BPF map in the sensor.

@@ -37,17 +37,6 @@ func RawAttachWithFlags(targetFD int, flags uint32) AttachFunc {
 	return winAttachStub
 }
 
-// func KprobeOpen(load *Program) OpenFunc {
-// 	return func(coll *ebpf.CollectionSpec) error {
-// 		return notSupportedWinErr
-// 	}
-// }
-
-// func kprobeAttach(load *Program, prog *ebpf.Program, spec *ebpf.ProgramSpec,
-// 	symbol string, bpfDir string, extra ...string) (unloader.Unloader, error) {
-// 	return nil, notSupportedWinErr
-// }
-
 func windowsAttach(load *Program, prog *ebpf.Program, spec *ebpf.ProgramSpec,
 	symbol string, bpfDir string, extra ...string) (unloader.Unloader, error) {
 
@@ -81,14 +70,6 @@ func WindowsAttach(load *Program, bpfDir string) AttachFunc {
 		return windowsAttach(load, prog, spec, load.Attach, bpfDir)
 	}
 }
-
-// func KprobeAttach(load *Program, bpfDir string) AttachFunc {
-// 	return func(coll *ebpf.Collection, collSpec *ebpf.CollectionSpec,
-// 		prog *ebpf.Program, spec *ebpf.ProgramSpec) (unloader.Unloader, error) {
-
-// 		return kprobeAttach(load, prog, spec, load.Attach, bpfDir)
-// 	}
-// }
 
 func LoadWindowsProgram(bpfDir string, load *Program, maps []*Map, verbose int) error {
 	opts := &LoadOpts{

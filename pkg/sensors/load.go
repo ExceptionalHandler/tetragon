@@ -149,7 +149,7 @@ func (s *Sensor) Load(bpfDir string) (err error) {
 	if err = s.FindPrograms(); err != nil {
 		return fmt.Errorf("tetragon, aborting could not find BPF programs: %w", err)
 	}
-	if err = s.loadMaps(bpfDir, loadedMaps); err != nil {
+	if loadedMaps, err = s.preLoadMaps(bpfDir, loadedMaps); err != nil {
 		return err
 	}
 	for _, p := range s.Progs {
