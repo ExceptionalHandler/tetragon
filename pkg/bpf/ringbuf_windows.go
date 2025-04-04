@@ -213,7 +213,6 @@ func (reader *WindowsRingBufReader) invokeIoctl(request unsafe.Pointer, dwReqSiz
 	}
 
 	if actualReplySize != replySize && !variableReplySize {
-		//fmt.Printf("\nDevice io control incorrect reply. ")
 		return err
 	}
 	return nil
