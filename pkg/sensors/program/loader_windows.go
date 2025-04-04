@@ -11,6 +11,7 @@ import (
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/tetragon/pkg/bpf"
+	"github.com/cilium/tetragon/pkg/constants"
 	"github.com/cilium/tetragon/pkg/logger"
 	"github.com/cilium/tetragon/pkg/sensors/unloader"
 	"golang.org/x/sys/windows"
@@ -26,22 +27,22 @@ func makeGUID(data1 uint32, data2 uint16, data3 uint16, data4 [8]byte) windows.G
 	return windows.GUID{Data1: data1, Data2: data2, Data3: data3, Data4: data4}
 }
 
-func WinAttachStub(_ *ebpf.Collection, _ *ebpf.CollectionSpec,
+func winAttachStub(_ *ebpf.Collection, _ *ebpf.CollectionSpec,
 	prog *ebpf.Program, spec *ebpf.ProgramSpec) (unloader.Unloader, error) {
 
 	return nil, notSupportedWinErr
 }
 
 func RawAttachWithFlags(targetFD int, flags uint32) AttachFunc {
-	return WinAttachStub
+	return winAttachStub
 }
 
 func TracepointAttach(load *Program, bpfDir string) AttachFunc {
-	return WinAttachStub
+	return winAttachStub
 }
 
 func RawTracepointAttach(load *Program) AttachFunc {
-	return WinAttachStub
+	return winAttachStub
 }
 
 func KprobeOpen(load *Program) OpenFunc {
@@ -114,7 +115,7 @@ func MultiUprobeAttach(load *Program) AttachFunc {
 }
 
 func TracingAttach(load *Program, bpfDir string) AttachFunc {
-	return WinAttachStub
+	return winAttachStub
 }
 
 func LSMOpen(load *Program) OpenFunc {
@@ -124,11 +125,11 @@ func LSMOpen(load *Program) OpenFunc {
 }
 
 func LSMAttach() AttachFunc {
-	return WinAttachStub
+	return winAttachStub
 }
 
 func MultiKprobeAttach(load *Program, bpfDir string) AttachFunc {
-	return WinAttachStub
+	return winAttachStub
 }
 
 func LoadWindowsProgram(bpfDir string, load *Program, maps []*Map, verbose int) error {
@@ -138,12 +139,52 @@ func LoadWindowsProgram(bpfDir string, load *Program, maps []*Map, verbose int) 
 	return loadProgram(bpfDir, load, opts, verbose)
 }
 
+func LoadTracepointProgram(bpfDir string, load *Program, maps []*Map, verbose int) error {
+	return constants.ErrWindowsNotSupported
+}
+
+func LoadRawTracepointProgram(bpfDir string, load *Program, maps []*Map, verbose int) error {
+	return constants.ErrWindowsNotSupported
+}
+
+func LoadKprobeProgram(bpfDir string, load *Program, maps []*Map, verbose int) error {
+	return constants.ErrWindowsNotSupported
+}
+
 func KprobeAttachMany(load *Program, syms []string, bpfDir string) AttachFunc {
-	return WinAttachStub
+	return winAttachStub
+}
+
+func LoadKprobeProgramAttachMany(bpfDir string, load *Program, syms []string, maps []*Map, verbose int) error {
+	return constants.ErrWindowsNotSupported
+}
+
+func LoadUprobeProgram(bpfDir string, load *Program, maps []*Map, verbose int) error {
+	return constants.ErrWindowsNotSupported
+}
+
+func LoadMultiKprobeProgram(bpfDir string, load *Program, maps []*Map, verbose int) error {
+	return constants.ErrWindowsNotSupported
 }
 
 func LoadFmodRetProgram(bpfDir string, load *Program, maps []*Map, progName string, verbose int) error {
-	return fmt.Errorf("not supported on windows")
+	return constants.ErrWindowsNotSupported
+}
+
+func LoadTracingProgram(bpfDir string, load *Program, maps []*Map, verbose int) error {
+	return constants.ErrWindowsNotSupported
+}
+
+func LoadLSMProgram(bpfDir string, load *Program, maps []*Map, verbose int) error {
+	return constants.ErrWindowsNotSupported
+}
+
+func LoadLSMProgramSimple(bpfDir string, load *Program, maps []*Map, verbose int) error {
+	return constants.ErrWindowsNotSupported
+}
+
+func LoadMultiUprobeProgram(bpfDir string, load *Program, maps []*Map, verbose int) error {
+	return constants.ErrWindowsNotSupported
 }
 
 func doLoadProgram(

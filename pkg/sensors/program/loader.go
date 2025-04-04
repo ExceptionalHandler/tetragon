@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright Authors of Tetragon
 package program
 
 import (
@@ -42,89 +44,6 @@ func NoAttach() AttachFunc {
 			},
 		}, nil
 	}
-}
-
-func LoadTracepointProgram(bpfDir string, load *Program, maps []*Map, verbose int) error {
-	opts := &LoadOpts{
-		Attach: TracepointAttach(load, bpfDir),
-		Maps:   maps,
-	}
-	return loadProgram(bpfDir, load, opts, verbose)
-}
-
-func LoadRawTracepointProgram(bpfDir string, load *Program, maps []*Map, verbose int) error {
-	opts := &LoadOpts{
-		Attach: RawTracepointAttach(load),
-		Maps:   maps,
-	}
-	return loadProgram(bpfDir, load, opts, verbose)
-}
-
-func LoadKprobeProgram(bpfDir string, load *Program, maps []*Map, verbose int) error {
-	opts := &LoadOpts{
-		Attach: KprobeAttach(load, bpfDir),
-		Open:   KprobeOpen(load),
-		Maps:   maps,
-	}
-	return loadProgram(bpfDir, load, opts, verbose)
-}
-
-func LoadKprobeProgramAttachMany(bpfDir string, load *Program, syms []string, maps []*Map, verbose int) error {
-	opts := &LoadOpts{
-		Attach: KprobeAttachMany(load, syms, bpfDir),
-		Maps:   maps,
-	}
-	return loadProgram(bpfDir, load, opts, verbose)
-}
-
-func LoadUprobeProgram(bpfDir string, load *Program, maps []*Map, verbose int) error {
-	opts := &LoadOpts{
-		Attach: UprobeAttach(load),
-		Maps:   maps,
-	}
-	return loadProgram(bpfDir, load, opts, verbose)
-}
-
-func LoadMultiKprobeProgram(bpfDir string, load *Program, maps []*Map, verbose int) error {
-	opts := &LoadOpts{
-		Attach: MultiKprobeAttach(load, bpfDir),
-		Open:   KprobeOpen(load),
-		Maps:   maps,
-	}
-	return loadProgram(bpfDir, load, opts, verbose)
-}
-
-func LoadTracingProgram(bpfDir string, load *Program, maps []*Map, verbose int) error {
-	opts := &LoadOpts{
-		Attach: TracingAttach(load, bpfDir),
-		Maps:   maps,
-	}
-	return loadProgram(bpfDir, load, opts, verbose)
-}
-
-func LoadLSMProgram(bpfDir string, load *Program, maps []*Map, verbose int) error {
-	opts := &LoadOpts{
-		Attach: LSMAttach(),
-		Open:   LSMOpen(load),
-		Maps:   maps,
-	}
-	return loadProgram(bpfDir, load, opts, verbose)
-}
-
-func LoadLSMProgramSimple(bpfDir string, load *Program, maps []*Map, verbose int) error {
-	opts := &LoadOpts{
-		Attach: LSMAttach(),
-		Maps:   maps,
-	}
-	return loadProgram(bpfDir, load, opts, verbose)
-}
-
-func LoadMultiUprobeProgram(bpfDir string, load *Program, maps []*Map, verbose int) error {
-	opts := &LoadOpts{
-		Attach: MultiUprobeAttach(load),
-		Maps:   maps,
-	}
-	return loadProgram(bpfDir, load, opts, verbose)
 }
 
 // MissingConstantsError is returned by [rewriteConstants].
