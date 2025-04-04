@@ -100,6 +100,8 @@ const (
 	ERR_RINGBUF_TRY_AGAIN        = 2
 	ERR_RINGBUF_RECORD_DISCARDED = 3
 	ERR_RINGBUF_UNKNOWN_ERROR    = 4
+	EBPF_OP_MAP_ASYNC_QUERY      = 29
+	EBPF_OP_MAP_QUERY_BUF        = 28
 
 	EBPF_IO_DEVICE = `\\.\EbpfIoDevice`
 )
@@ -278,7 +280,7 @@ func (reader *WindowsRingBufReader) Init(fd int, ring_buffer_size int) error {
 	}
 	var req _ebpf_operation_map_query_buffer_request
 	req.map_handle = uint64(handle)
-	req.header.id = 28
+	req.header.id = EBPF_OP_MAP_QUERY_BUF
 	req.header.length = uint16(unsafe.Sizeof(req))
 	var reply _ebpf_operation_map_query_buffer_reply
 	err = reader.invokeIoctl(unsafe.Pointer(&req), uint32(unsafe.Sizeof(req)), unsafe.Pointer(&reply), uint32(unsafe.Sizeof(reply)), nil)
@@ -290,7 +292,7 @@ func (reader *WindowsRingBufReader) Init(fd int, ring_buffer_size int) error {
 	reader.byteBuf = unsafe.Slice((*byte)(unsafe.Pointer(buffer)), ring_buffer_size)
 
 	reader.currRequest.header.length = uint16(unsafe.Sizeof(reader.currRequest))
-	reader.currRequest.header.id = 29
+	reader.currRequest.header.id = EBPF_OP_MAP_ASYNC_QUERY
 	reader.currRequest.map_handle = uint64(handle)
 	reader.currRequest.consumer_offset = reply.consumer_offset
 
