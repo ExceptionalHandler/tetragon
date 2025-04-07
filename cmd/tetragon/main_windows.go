@@ -21,3 +21,6 @@ func initCachedBTF(lib, btf string) error {
 func checkStructAlignments() error {
 	return nil
 }
+
+func setNetNSDir() {
+}

@@ -272,6 +272,8 @@ func tetragonExecuteCtx(ctx context.Context, cancel context.CancelFunc, ready fu
 		log.Info("Not unloading sensors on exit")
 	}
 
+	setNetNSDir()
+
 	if err := checkStructAlignments(); err != nil {
 		return fmt.Errorf("struct alignment checks failed: %w", err)
 	}
