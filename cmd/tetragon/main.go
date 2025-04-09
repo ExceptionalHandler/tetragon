@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net"
@@ -301,7 +302,7 @@ func tetragonExecuteCtx(ctx context.Context, cancel context.CancelFunc, ready fu
 	// bother renaming in that case.
 	oldBpfDir, err := getOldBpfDir(bpf.MapPrefixPath())
 	if err != nil {
-		return fmt.Errorf("Failed to move old tetragon base directory: %w", err)
+		return fmt.Errorf("failed to move old tetragon base directory: %w", err)
 	}
 
 	if option.Config.PprofAddr != "" {
@@ -413,6 +414,9 @@ func tetragonExecuteCtx(ctx context.Context, cancel context.CancelFunc, ready fu
 		realK8sWatcher := k8sWatcher.(*watcher.K8sWatcher)
 		err = watcher.AddPodInformer(realK8sWatcher, true)
 		if err != nil {
+			return err
+		}
+		if err := watcher.AddNamespaceInformer(k8sWatcher); err != nil {
 			return err
 		}
 	} else {
@@ -600,7 +604,7 @@ func loadTpFromDir(ctx context.Context, dir string) error {
 			log.WithField("tracing-policy-dir", dir).Info("Loading Tracing Policies from directory ignored, directory does not exist")
 			return nil
 		}
-		return fmt.Errorf("Failed to access tracing policies dir %s: %w", dir, err)
+		return fmt.Errorf("failed to access tracing policies dir %s: %w", dir, err)
 	}
 
 	tpMaxDepth := 1
@@ -729,7 +733,7 @@ func startExporter(ctx context.Context, server *server.Server) error {
 	finfo, err := os.Stat(filepath.Clean(option.Config.ExportFilename))
 	if err == nil && finfo.IsDir() {
 		// Error if exportFilename points to a directory
-		return fmt.Errorf("passed export JSON logs file point to a directory")
+		return errors.New("passed export JSON logs file point to a directory")
 	}
 	logFile := filepath.Base(option.Config.ExportFilename)
 	logsDir, err := filepath.Abs(filepath.Dir(filepath.Clean(option.Config.ExportFilename)))
